@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "defaultHost": "<from-proxy>",
+  "defaultHost": "01.skl.lol:65482",
   "defaultProxy": "proxy.mcraft.fun",
   "defaultVersion": "1.18.2",
   "mapsProvider": "https://maps.mcraft.fun/"
