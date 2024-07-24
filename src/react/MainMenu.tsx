@@ -71,6 +71,7 @@ export default ({ connectToServerAction, mapsProvider, singleplayerAction, optio
         >
           Connect to server
         </ButtonWithTooltip>
+        <!--
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
           <ButtonWithTooltip
             style={{ width: 170 }}
@@ -95,6 +96,7 @@ export default ({ connectToServerAction, mapsProvider, singleplayerAction, optio
             }}
           />
         </div>
+          -->
         <Button
           onClick={optionsAction}
         >
