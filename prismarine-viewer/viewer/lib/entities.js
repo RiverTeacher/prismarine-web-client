@@ -1,23 +1,26 @@
 //@ts-check
-const THREE = require('three')
-const TWEEN = require('@tweenjs/tween.js')
-
-const Entity = require('./entity/EntityMesh')
-const { dispose3 } = require('./dispose')
-const EventEmitter = require('events')
+import EventEmitter from 'events'
+import nbt from 'prismarine-nbt'
+import * as TWEEN from '@tweenjs/tween.js'
+import * as THREE from 'three'
 import { PlayerObject, PlayerAnimation } from 'skinview3d'
 import { loadSkinToCanvas, loadEarsToCanvasFromSkin, inferModelType, loadCapeToCanvas, loadImage } from 'skinview-utils'
 // todo replace with url
-import stevePng from 'minecraft-assets/minecraft-assets/data/1.20.2/entity/player/wide/steve.png'
-import { WalkingGeneralSwing } from './entity/animations'
+import stevePng from 'mc-assets/dist/other-textures/latest/entity/player/wide/steve.png'
 import { NameTagObject } from 'skinview3d/libs/nametag'
 import { flat, fromFormattedString } from '@xmcl/text-component'
 import mojangson from 'mojangson'
+import * as Entity from './entity/EntityMesh'
+import { WalkingGeneralSwing } from './entity/animations'
 import externalTexturesJson from './entity/externalTextures.json'
+import { disposeObject } from './threeJsUtils'
 
-export const TWEEN_DURATION = 50 // todo should be 100
+export const TWEEN_DURATION = 120
 
-function getUsernameTexture (username, { fontFamily = 'sans-serif' }) {
+/**
+ * @param {string} username
+ */
+function getUsernameTexture(username, { fontFamily = 'sans-serif' }) {
   const canvas = document.createElement('canvas')
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('Could not get 2d context')
@@ -43,7 +46,7 @@ function getUsernameTexture (username, { fontFamily = 'sans-serif' }) {
 
 const addNametag = (entity, options, mesh) => {
   if (entity.username !== undefined) {
-    if (mesh.children.find(c => c.name === 'nametag')) return // todo update
+    if (mesh.children.some(c => c.name === 'nametag')) return // todo update
     const canvas = getUsernameTexture(entity.username, options)
     const tex = new THREE.Texture(canvas)
     tex.needsUpdate = true
@@ -58,7 +61,10 @@ const addNametag = (entity, options, mesh) => {
   }
 }
 
-function getEntityMesh (entity, scene, options, overrides) {
+// todo cleanup
+const nametags = {}
+
+function getEntityMesh(entity, scene, options, overrides) {
   if (entity.name) {
     try {
       // https://github.com/PrismarineJS/prismarine-viewer/pull/410
@@ -78,36 +84,41 @@ function getEntityMesh (entity, scene, options, overrides) {
   geometry.translate(0, entity.height / 2, 0)
   const material = new THREE.MeshBasicMaterial({ color: 0xff_00_ff })
   const cube = new THREE.Mesh(geometry, material)
-  addNametag({
-    username: entity.name,
-    height: entity.height,
-  }, options, cube)
+  const nametagCount = (nametags[entity.name] = (nametags[entity.name] || 0) + 1)
+  if (nametagCount < 6) {
+    addNametag({
+      username: entity.name,
+      height: entity.height,
+    }, options, cube)
+  }
   return cube
 }
 
 export class Entities extends EventEmitter {
   constructor(scene) {
     super()
+    /** @type {THREE.Scene} */
     this.scene = scene
     this.entities = {}
     this.entitiesOptions = {}
     this.debugMode = 'none'
     this.onSkinUpdate = () => { }
     this.clock = new THREE.Clock()
-    this.visible = true
+    this.rendering = true
+    /** @type {THREE.Texture | null} */
     this.itemsTexture = null
     this.getItemUv = undefined
   }
 
-  clear () {
+  clear() {
     for (const mesh of Object.values(this.entities)) {
       this.scene.remove(mesh)
-      dispose3(mesh)
+      disposeObject(mesh)
     }
     this.entities = {}
   }
 
-  setDebugMode (mode, /** @type {THREE.Object3D?} */entity = null) {
+  setDebugMode(mode, /** @type {THREE.Object3D?} */entity = null) {
     this.debugMode = mode
     for (const mesh of entity ? [entity] : Object.values(this.entities)) {
       const boxHelper = mesh.children.find(c => c.name === 'debug')
@@ -119,14 +130,18 @@ export class Entities extends EventEmitter {
     }
   }
 
-  setVisible (visible, /** @type {THREE.Object3D?} */entity = null) {
-    this.visible = visible
-    for (const mesh of entity ? [entity] : Object.values(this.entities)) {
-      mesh.visible = visible
+  setRendering(rendering, /** @type {THREE.Object3D?} */entity = null) {
+    this.rendering = rendering
+    for (const ent of entity ? [entity] : Object.values(this.entities)) {
+      if (rendering) {
+        if (!this.scene.children.includes(ent)) this.scene.add(ent)
+      } else {
+        this.scene.remove(ent)
+      }
     }
   }
 
-  render () {
+  render() {
     const dt = this.clock.getDelta()
     for (const entityId of Object.keys(this.entities)) {
       const playerObject = this.getPlayerObject(entityId)
@@ -136,7 +151,7 @@ export class Entities extends EventEmitter {
     }
   }
 
-  getPlayerObject (entityId) {
+  getPlayerObject(entityId) {
     /** @type {(PlayerObject & { animation?: PlayerAnimation }) | undefined} */
     const playerObject = this.entities[entityId]?.playerObject
     return playerObject
@@ -146,7 +161,7 @@ export class Entities extends EventEmitter {
   defaultSteveTexture
 
   // true means use default skin url
-  updatePlayerSkin (entityId, username, /** @type {string | true} */skinUrl, /** @type {string | true | undefined} */capeUrl = undefined) {
+  updatePlayerSkin(entityId, username, /** @type {string | true} */skinUrl, /** @type {string | true | undefined} */capeUrl = undefined) {
     let playerObject = this.getPlayerObject(entityId)
     if (!playerObject) return
     // const username = this.entities[entityId].username
@@ -155,7 +170,7 @@ export class Entities extends EventEmitter {
       skinUrl = `https://mulv.tycrek.dev/api/lookup?username=${username}&type=skin`
       if (!username) return
     }
-    loadImage(skinUrl).then((image) => {
+    loadImage(skinUrl).then(image => {
       playerObject = this.getPlayerObject(entityId)
       if (!playerObject) return
       /** @type {THREE.CanvasTexture} */
@@ -173,28 +188,28 @@ export class Entities extends EventEmitter {
       skinTexture.magFilter = THREE.NearestFilter
       skinTexture.minFilter = THREE.NearestFilter
       skinTexture.needsUpdate = true
-      //@ts-ignore
+      //@ts-expect-error
       playerObject.skin.map = skinTexture
       playerObject.skin.modelType = inferModelType(skinTexture.image)
 
       const earsCanvas = document.createElement('canvas')
       loadEarsToCanvasFromSkin(earsCanvas, image)
-      if (!isCanvasBlank(earsCanvas)) {
+      if (isCanvasBlank(earsCanvas)) {
+        playerObject.ears.map = null
+        playerObject.ears.visible = false
+      } else {
         const earsTexture = new THREE.CanvasTexture(earsCanvas)
         earsTexture.magFilter = THREE.NearestFilter
         earsTexture.minFilter = THREE.NearestFilter
         earsTexture.needsUpdate = true
-        //@ts-ignore
+        //@ts-expect-error
         playerObject.ears.map = earsTexture
         playerObject.ears.visible = true
-      } else {
-        playerObject.ears.map = null
-        playerObject.ears.visible = false
       }
       this.onSkinUpdate?.()
       if (capeUrl) {
         if (capeUrl === true) capeUrl = `https://mulv.tycrek.dev/api/lookup?username=${username}&type=cape`
-        loadImage(capeUrl).then((capeImage) => {
+        loadImage(capeUrl).then(capeImage => {
           playerObject = this.getPlayerObject(entityId)
           if (!playerObject) return
           const capeCanvas = document.createElement('canvas')
@@ -204,10 +219,10 @@ export class Entities extends EventEmitter {
           capeTexture.magFilter = THREE.NearestFilter
           capeTexture.minFilter = THREE.NearestFilter
           capeTexture.needsUpdate = true
-          //@ts-ignore
+          //@ts-expect-error
           playerObject.cape.map = capeTexture
           playerObject.cape.visible = true
-          //@ts-ignore
+          //@ts-expect-error
           playerObject.elytra.map = capeTexture
           this.onSkinUpdate?.()
 
@@ -229,14 +244,14 @@ export class Entities extends EventEmitter {
       playerObject.cape.map = null
     }
 
-    function isCanvasBlank (canvas) {
+    function isCanvasBlank(canvas) {
       return !canvas.getContext('2d')
         .getImageData(0, 0, canvas.width, canvas.height).data
         .some(channel => channel !== 0)
     }
   }
 
-  playAnimation (entityPlayerId, /** @type {'walking' | 'running' | 'oneSwing' | 'idle'} */animation) {
+  playAnimation(entityPlayerId, /** @type {'walking' | 'running' | 'oneSwing' | 'idle'} */animation) {
     const playerObject = this.getPlayerObject(entityPlayerId)
     if (!playerObject) return
 
@@ -256,14 +271,58 @@ export class Entities extends EventEmitter {
 
   }
 
-  displaySimpleText (jsonLike) {
+  parseEntityLabel(jsonLike) {
     if (!jsonLike) return
-    const parsed = mojangson.simplify(mojangson.parse(jsonLike))
-    const text = flat(parsed).map(x => x.text)
-    return text.join('')
+    try {
+      const parsed = typeof jsonLike === 'string' ? mojangson.simplify(mojangson.parse(jsonLike)) : nbt.simplify(jsonLike)
+      const text = flat(parsed).map(x => x.text)
+      return text.join('')
+    } catch (err) {
+      return jsonLike
+    }
   }
 
-  update (/** @type {import('prismarine-entity').Entity & {delete?, pos}} */entity, overrides) {
+  getItemMesh(item) {
+    const textureUv = this.getItemUv?.(item.itemId ?? item.blockId)
+    if (textureUv) {
+      // todo use geometry buffer uv instead!
+      const { u, v, size, su, sv, texture } = textureUv
+      const itemsTexture = texture.clone()
+      itemsTexture.flipY = true
+      itemsTexture.offset.set(u, 1 - v - (sv ?? size))
+      itemsTexture.repeat.set(su ?? size, sv ?? size)
+      itemsTexture.needsUpdate = true
+      itemsTexture.magFilter = THREE.NearestFilter
+      itemsTexture.minFilter = THREE.NearestFilter
+      const itemsTextureFlipped = itemsTexture.clone()
+      itemsTextureFlipped.repeat.x *= -1
+      itemsTextureFlipped.needsUpdate = true
+      itemsTextureFlipped.offset.set(u + (su ?? size), 1 - v - (sv ?? size))
+      const material = new THREE.MeshStandardMaterial({
+        map: itemsTexture,
+        transparent: true,
+        alphaTest: 0.1,
+      })
+      const materialFlipped = new THREE.MeshStandardMaterial({
+        map: itemsTextureFlipped,
+        transparent: true,
+        alphaTest: 0.1,
+      })
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 0), [
+        // top left and right bottom are black box materials others are transparent
+        new THREE.MeshBasicMaterial({ color: 0x00_00_00 }), new THREE.MeshBasicMaterial({ color: 0x00_00_00 }),
+        new THREE.MeshBasicMaterial({ color: 0x00_00_00 }), new THREE.MeshBasicMaterial({ color: 0x00_00_00 }),
+        material, materialFlipped,
+      ])
+      return {
+        mesh,
+        itemsTexture,
+        itemsTextureFlipped,
+      }
+    }
+  }
+
+  update(/** @type {import('prismarine-entity').Entity & {delete?, pos}} */entity, overrides) {
     let isPlayerModel = entity.name === 'player'
     if (entity.name === 'zombie' || entity.name === 'zombie_villager' || entity.name === 'husk') {
       isPlayerModel = true
@@ -274,55 +333,26 @@ export class Entities extends EventEmitter {
       let mesh
       if (entity.name === 'item') {
         /** @type {any} */
-        //@ts-ignore
-        const item = entity.metadata?.find(m => typeof m === 'object' && m !== null && m.itemCount)
+        //@ts-expect-error
+        const item = entity.metadata?.find(m => typeof m === 'object' && m?.itemCount)
         if (item) {
-          const textureUv = this.getItemUv?.(item.itemId ?? item.blockId)
-          if (textureUv) {
-            // todo use geometry buffer uv instead!
-            const { u, v, size, su, sv, texture } = textureUv
-            const itemsTexture = texture.clone()
-            itemsTexture.flipY = true
-            itemsTexture.offset.set(u, 1 - v - (sv ?? size))
-            itemsTexture.repeat.set(su ?? size, sv ?? size)
-            itemsTexture.needsUpdate = true
-            itemsTexture.magFilter = THREE.NearestFilter
-            itemsTexture.minFilter = THREE.NearestFilter
-            const itemsTextureFlipped = itemsTexture.clone()
-            itemsTextureFlipped.repeat.x *= -1
-            itemsTextureFlipped.needsUpdate = true
-            itemsTextureFlipped.offset.set(u + (su ?? size), 1 - v - (sv ?? size))
-            const material = new THREE.MeshStandardMaterial({
-              map: itemsTexture,
-              transparent: true,
-              alphaTest: 0.1,
-            })
-            const materialFlipped = new THREE.MeshStandardMaterial({
-              map: itemsTextureFlipped,
-              transparent: true,
-              alphaTest: 0.1,
-            })
-            mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 0.0), [
-              // top left and right bottom are black box materials others are transparent
-              new THREE.MeshBasicMaterial({ color: 0x000000 }), new THREE.MeshBasicMaterial({ color: 0x000000 }),
-              new THREE.MeshBasicMaterial({ color: 0x000000 }), new THREE.MeshBasicMaterial({ color: 0x000000 }),
-              material, materialFlipped
-            ])
-            mesh.scale.set(0.5, 0.5, 0.5)
-            mesh.position.set(0, 0.2, 0)
+          const object = this.getItemMesh(item)
+          if (object) {
+            object.scale.set(0.5, 0.5, 0.5)
+            object.position.set(0, 0.2, 0)
             // set faces
             // mesh.position.set(targetPos.x + 0.5 + 2, targetPos.y + 0.5, targetPos.z + 0.5)
             // viewer.scene.add(mesh)
             const clock = new THREE.Clock()
-            mesh.onBeforeRender = () => {
+            object.onBeforeRender = () => {
               const delta = clock.getDelta()
-              mesh.rotation.y += delta
+              object.rotation.y += delta
             }
-            //@ts-ignore
+            //@ts-expect-error
             group.additionalCleanup = () => {
               // important: avoid texture memory leak and gpu slowdown
-              itemsTexture.dispose()
-              itemsTextureFlipped.dispose()
+              object.itemsTexture.dispose()
+              object.itemsTextureFlipped.dispose()
             }
           }
         }
@@ -333,7 +363,7 @@ export class Entities extends EventEmitter {
         const playerObject = new PlayerObject()
         playerObject.position.set(0, 16, 0)
 
-        //@ts-ignore
+        //@ts-expect-error
         wrapper.add(playerObject)
         const scale = 1 / 16
         wrapper.scale.set(scale, scale, scale)
@@ -346,16 +376,16 @@ export class Entities extends EventEmitter {
           nameTag.position.y = playerObject.position.y + playerObject.scale.y * 16 + 3
           nameTag.renderOrder = 1000
 
-          //@ts-ignore
+          //@ts-expect-error
           wrapper.add(nameTag)
         }
 
-        //@ts-ignore
+        //@ts-expect-error
         group.playerObject = playerObject
         wrapper.rotation.set(0, Math.PI, 0)
         mesh = wrapper
         playerObject.animation = new WalkingGeneralSwing()
-        //@ts-ignore
+        //@ts-expect-error
         playerObject.animation.isMoving = false
       } else {
         mesh = getEntityMesh(entity, this.scene, this.entitiesOptions, overrides)
@@ -366,11 +396,12 @@ export class Entities extends EventEmitter {
       group.position.set(entity.pos.x, entity.pos.y, entity.pos.z)
 
       // todo use width and height instead
-      const boxHelper = new THREE.BoxHelper(mesh,
-        entity.type === 'hostile' ? 0xff0000 :
-          entity.type === 'mob' ? 0x00ff00 :
-            entity.type === "player" ? 0x0000ff :
-              0xffa500
+      const boxHelper = new THREE.BoxHelper(
+        mesh,
+        entity.type === 'hostile' ? 0xff_00_00 :
+          entity.type === 'mob' ? 0x00_ff_00 :
+            entity.type === 'player' ? 0x00_00_ff :
+              0xff_a5_00,
       )
       boxHelper.name = 'debug'
       group.add(mesh)
@@ -386,20 +417,20 @@ export class Entities extends EventEmitter {
         this.updatePlayerSkin(entity.id, '', overrides?.texture || stevePng)
       }
       this.setDebugMode(this.debugMode, group)
-      this.setVisible(this.visible, group)
+      this.setRendering(this.rendering, group)
     }
 
-    //@ts-ignore
+    //@ts-expect-error
+    // set visibility
     const isInvisible = entity.metadata?.[0] & 0x20
-    if (isInvisible) {
-      for (const child of this.entities[entity.id].children.find(c => c.name === 'mesh').children) {
-        if (child.name !== 'nametag') {
-          child.visible = false
-        }
+    for (const child of this.entities[entity.id]?.children.find(c => c.name === 'mesh')?.children ?? []) {
+      if (child.name !== 'nametag') {
+        child.visible = !isInvisible
       }
     }
+    // ---
     // not player
-    const displayText = entity.metadata?.[3] && this.displaySimpleText(entity.metadata[2])
+    const displayText = entity.metadata?.[3] && this.parseEntityLabel(entity.metadata[2])
     if (entity.name !== 'player' && displayText) {
       addNametag({ ...entity, username: displayText }, this.entitiesOptions, this.entities[entity.id].children.find(c => c.name === 'mesh'))
     }
@@ -440,6 +471,7 @@ export class Entities extends EventEmitter {
 
     if (e?.playerObject && overrides?.rotation?.head) {
       /** @type {PlayerObject} */
+      // eslint-disable-next-line prefer-destructuring
       const playerObject = e.playerObject
       const headRotationDiff = overrides.rotation.head.y ? overrides.rotation.head.y - entity.yaw : 0
       playerObject.skin.head.rotation.y = -headRotationDiff
@@ -450,7 +482,7 @@ export class Entities extends EventEmitter {
       if (e.additionalCleanup) e.additionalCleanup()
       this.emit('remove', entity)
       this.scene.remove(e)
-      dispose3(e)
+      disposeObject(e)
       // todo dispose textures as well ?
       delete this.entities[entity.id]
     }
@@ -462,6 +494,24 @@ export class Entities extends EventEmitter {
       const da = (entity.yaw - e.rotation.y) % (Math.PI * 2)
       const dy = 2 * da % (Math.PI * 2) - da
       new TWEEN.Tween(e.rotation).to({ y: e.rotation.y + dy }, TWEEN_DURATION).start()
+    }
+  }
+
+  handleDamageEvent(entityId, damageAmount) {
+    const entityMesh = this.entities[entityId]?.children.find(c => c.name === 'mesh')
+    if (entityMesh) {
+      entityMesh.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          const clonedMaterial = child.material.clone()
+          clonedMaterial.dispose()
+          child.material = child.material.clone()
+          const originalColor = child.material.color.clone()
+          child.material.color.set(0xff_00_00)
+          new TWEEN.Tween(child.material.color)
+            .to(originalColor, 500)
+            .start()
+        }
+      })
     }
   }
 }

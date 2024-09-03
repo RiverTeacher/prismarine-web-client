@@ -6,11 +6,12 @@ import { subscribeKey } from 'valtio/utils'
 import { omitObj } from '@zardoy/utils'
 
 const defaultOptions = {
-  renderDistance: 2,
-  multiplayerRenderDistance: 2,
+  renderDistance: 3,
+  keepChunksDistance: 1,
+  multiplayerRenderDistance: 3,
   closeConfirmation: true,
   autoFullScreen: false,
-  mouseRawInput: false,
+  mouseRawInput: true,
   autoExitFullscreen: false,
   localUsername: 'wanderer',
   mouseSensX: 50,
@@ -30,26 +31,10 @@ const defaultOptions = {
   touchButtonsSize: 40,
   touchButtonsOpacity: 80,
   touchButtonsPosition: 12,
-  touchControlsPositions: {
-    action: [
-      70,
-      85
-    ],
-    sneak: [
-      90,
-      85
-    ],
-    break: [
-      70,
-      65
-    ],
-    jump: [
-      90,
-      65
-    ],
-  } as Record<string, [number, number]>,
+  touchControlsPositions: getDefaultTouchControlsPositions(),
   touchControlsType: 'classic' as 'classic' | 'joystick-buttons',
   gpuPreference: 'default' as 'default' | 'high-performance' | 'low-power',
+  backgroundRendering: '20fps' as 'full' | '20fps' | '5fps',
   /** @unstable */
   disableAssets: false,
   /** @unstable */
@@ -58,6 +43,12 @@ const defaultOptions = {
   dayCycleAndLighting: true,
   loadPlayerSkins: true,
   lowMemoryMode: false,
+  starfieldRendering: true,
+  enabledResourcepack: null as string | null,
+  useVersionsTextures: 'latest',
+  serverResourcePacks: 'prompt' as 'prompt' | 'always' | 'never',
+  handDisplay: false,
+
   // antiAliasing: false,
 
   showChunkBorders: false, // todo rename option
@@ -67,17 +58,20 @@ const defaultOptions = {
   excludeCommunicationDebugEvents: [],
   preventDevReloadWhilePlaying: false,
   numWorkers: 4,
-  localServerOptions: {} as any,
+  localServerOptions: {
+    gameMode: 1
+  } as any,
   preferLoadReadonly: false,
   disableLoadPrompts: false,
   guestUsername: 'guest',
   askGuestName: true,
+  errorReporting: true,
   /** Actually might be useful */
   showCursorBlockInSpectator: false,
   renderEntities: true,
   smoothLighting: true,
   newVersionsLighting: false,
-  chatSelect: false,
+  chatSelect: true,
   autoJump: 'auto' as 'auto' | 'always' | 'never',
   autoParkour: false,
 
@@ -88,6 +82,27 @@ const defaultOptions = {
   /** Wether to popup sign editor on server action */
   autoSignEditor: true,
   wysiwygSignEditor: 'auto' as 'auto' | 'always' | 'never',
+}
+
+function getDefaultTouchControlsPositions () {
+  return {
+    action: [
+      70,
+      76
+    ],
+    sneak: [
+      84,
+      76
+    ],
+    break: [
+      70,
+      60
+    ],
+    jump: [
+      84,
+      60
+    ],
+  } as Record<string, [number, number]>
 }
 
 const qsOptionsRaw = new URLSearchParams(location.search).getAll('setting')

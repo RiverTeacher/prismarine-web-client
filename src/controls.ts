@@ -6,20 +6,26 @@ import { proxy, subscribe } from 'valtio'
 import { ControMax } from 'contro-max/build/controMax'
 import { CommandEventArgument, SchemaCommandInput } from 'contro-max/build/types'
 import { stringStartsWith } from 'contro-max/build/stringUtils'
-import { isGameActive, showModal, gameAdditionalState, activeModalStack, hideCurrentModal, miscUiState } from './globalState'
+import { UserOverrideCommand, UserOverridesConfig } from 'contro-max/build/types/store'
+import { isGameActive, showModal, gameAdditionalState, activeModalStack, hideCurrentModal, miscUiState, loadedGameState } from './globalState'
 import { goFullscreen, pointerLock, reloadChunks } from './utils'
 import { options } from './optionsStorage'
 import { openPlayerInventory } from './inventoryWindows'
-import { chatInputValueGlobal } from './react/ChatContainer'
+import { chatInputValueGlobal } from './react/Chat'
 import { fsState } from './loadSave'
+import { customCommandsConfig } from './customCommands'
+import type { CustomCommand } from './react/KeybindingsCustom'
 import { showOptionsModal } from './react/SelectOption'
 import widgets from './react/widgets'
 import { getItemFromBlock } from './botUtils'
+import { gamepadUiCursorState, moveGamepadCursorByPx } from './react/GamepadUiCursor'
+import { completeTexturePackInstall, resourcePackState } from './resourcePack'
+import { showNotification } from './react/NotificationProvider'
 
-// todo move this to shared file with component
-export const customKeymaps = proxy(JSON.parse(localStorage.keymap || '{}'))
+
+export const customKeymaps = proxy(JSON.parse(localStorage.keymap || '{}')) as UserOverridesConfig
 subscribe(customKeymaps, () => {
-  localStorage.keymap = JSON.parse(customKeymaps)
+  localStorage.keymap = JSON.stringify(customKeymaps)
 })
 
 const controlOptions = {
@@ -32,23 +38,29 @@ export const contro = new ControMax({
       jump: ['Space', 'A'],
       inventory: ['KeyE', 'X'],
       drop: ['KeyQ', 'B'],
-      sneak: ['ShiftLeft', 'Right Stick'],
+      sneak: ['ShiftLeft'],
+      toggleSneakOrDown: [null, 'Right Stick'],
       sprint: ['ControlLeft', 'Left Stick'],
-      nextHotbarSlot: [null, 'Left Bumper'],
-      prevHotbarSlot: [null, 'Right Bumper'],
+      nextHotbarSlot: [null, 'Right Bumper'],
+      prevHotbarSlot: [null, 'Left Bumper'],
       attackDestroy: [null, 'Right Trigger'],
       interactPlace: [null, 'Left Trigger'],
       chat: [['KeyT', 'Enter']],
       command: ['Slash'],
+      swapHands: ['KeyF'],
       selectItem: ['KeyH'] // default will be removed
     },
     ui: {
       back: [null/* 'Escape' */, 'B'],
-      click: [null, 'A'],
+      leftClick: [null, 'A'],
+      rightClick: [null, 'Y'],
+      speedupCursor: [null, 'Left Stick'],
+      pauseMenu: [null, 'Start']
     },
     advanced: {
       lockUrl: ['KeyY'],
-    }
+    },
+    custom: {} as Record<string, SchemaCommandInput & { type: string, input: any[] }>,
     // waila: {
     //   showLookingBlockRecipe: ['Numpad3'],
     //   showLookingBlockUsages: ['Numpad4']
@@ -65,7 +77,7 @@ export const contro = new ControMax({
   defaultControlOptions: controlOptions,
   target: document,
   captureEvents () {
-    return bot && isGameActive(false)
+    return true
   },
   storeProvider: {
     load: () => customKeymaps,
@@ -76,17 +88,33 @@ export const contro = new ControMax({
 window.controMax = contro
 export type Command = CommandEventArgument<typeof contro['_commandsRaw']>['command']
 
-export const setDoPreventDefault = (state: boolean) => {
-  controlOptions.preventDefault = state
+updateBinds(customKeymaps)
+
+const updateDoPreventDefault = () => {
+  controlOptions.preventDefault = miscUiState.gameLoaded && !activeModalStack.length
 }
+
+subscribe(miscUiState, updateDoPreventDefault)
+subscribe(activeModalStack, updateDoPreventDefault)
+updateDoPreventDefault()
 
 const setSprinting = (state: boolean) => {
   bot.setControlState('sprint', state)
   gameAdditionalState.isSprinting = state
 }
 
-contro.on('movementUpdate', ({ vector, gamepadIndex }) => {
+contro.on('movementUpdate', ({ vector, soleVector, gamepadIndex }) => {
+  if (gamepadIndex !== undefined && gamepadUiCursorState.display) {
+    const deadzone = 0.1 // TODO make deadzone configurable
+    if (Math.abs(soleVector.x) < deadzone && Math.abs(soleVector.z) < deadzone) {
+      return
+    }
+    moveGamepadCursorByPx(soleVector.x, true)
+    moveGamepadCursorByPx(soleVector.z, false)
+    emitMousemove()
+  }
   miscUiState.usingGamepadInput = gamepadIndex !== undefined
+  if (!bot || !isGameActive(false)) return
   // gamepadIndex will be used for splitscreen in future
   const coordToAction = [
     ['z', -1, 'forward'],
@@ -144,25 +172,82 @@ subscribe(activeModalStack, () => {
   }
 })
 
-const uiCommand = (command: Command) => {
-  if (command === 'ui.back') {
-    hideCurrentModal()
-  } else if (command === 'ui.click') {
-    // todo cursor
+const emitMousemove = () => {
+  const { x, y } = gamepadUiCursorState
+  const xAbs = x / 100 * window.innerWidth
+  const yAbs = y / 100 * window.innerHeight
+  const element = document.elementFromPoint(xAbs, yAbs) as HTMLElement | null
+  if (!element) return
+  element.dispatchEvent(new MouseEvent('mousemove', {
+    clientX: xAbs,
+    clientY: yAbs
+  }))
+}
+
+let lastClickedEl = null as HTMLElement | null
+let lastClickedElTimeout: ReturnType<typeof setTimeout> | undefined
+const inModalCommand = (command: Command, pressed: boolean) => {
+  if (pressed && !gamepadUiCursorState.display) return
+
+  if (pressed) {
+    if (command === 'ui.back') {
+      hideCurrentModal()
+    }
+    if (command === 'ui.leftClick' || command === 'ui.rightClick') {
+      // in percent
+      const { x, y } = gamepadUiCursorState
+      const xAbs = x / 100 * window.innerWidth
+      const yAbs = y / 100 * window.innerHeight
+      const el = document.elementFromPoint(xAbs, yAbs) as HTMLElement
+      if (el) {
+        if (el === lastClickedEl && command === 'ui.leftClick') {
+          el.dispatchEvent(new MouseEvent('dblclick', {
+            bubbles: true,
+            clientX: xAbs,
+            clientY: yAbs
+          }))
+          return
+        }
+        el.dispatchEvent(new MouseEvent('mousedown', {
+          button: command === 'ui.leftClick' ? 0 : 2,
+          bubbles: true,
+          clientX: xAbs,
+          clientY: yAbs
+        }))
+        el.dispatchEvent(new MouseEvent(command === 'ui.leftClick' ? 'click' : 'contextmenu', {
+          bubbles: true,
+          clientX: xAbs,
+          clientY: yAbs
+        }))
+        el.dispatchEvent(new MouseEvent('mouseup', {
+          button: command === 'ui.leftClick' ? 0 : 2,
+          bubbles: true,
+          clientX: xAbs,
+          clientY: yAbs
+        }))
+        el.focus()
+        lastClickedEl = el
+        if (lastClickedElTimeout) clearTimeout(lastClickedElTimeout)
+        lastClickedElTimeout = setTimeout(() => {
+          lastClickedEl = null
+        }, 500)
+      }
+    }
+  }
+
+  if (command === 'ui.speedupCursor') {
+    gamepadUiCursorState.multiply = pressed ? 2 : 1
   }
 }
 
-export const setSneaking = (state: boolean) => {
+const setSneaking = (state: boolean) => {
   gameAdditionalState.isSneaking = state
   bot.setControlState('sneak', state)
 }
 
 const onTriggerOrReleased = (command: Command, pressed: boolean) => {
   // always allow release!
-  if (pressed && !isGameActive(true)) {
-    uiCommand(command)
-    return
-  }
+  if (!bot || !isGameActive(false)) return
   if (stringStartsWith(command, 'general')) {
     // handle general commands
     // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
@@ -179,6 +264,14 @@ const onTriggerOrReleased = (command: Command, pressed: boolean) => {
           setSprinting(pressed)
         }
         break
+      case 'general.toggleSneakOrDown':
+        if (gameAdditionalState.isFlying) {
+          setSneaking(pressed)
+        } else if (pressed) {
+          setSneaking(!gameAdditionalState.isSneaking)
+        }
+
+        break
       case 'general.attackDestroy':
         document.dispatchEvent(new MouseEvent(pressed ? 'mousedown' : 'mouseup', { button: 0 }))
         break
@@ -190,7 +283,9 @@ const onTriggerOrReleased = (command: Command, pressed: boolean) => {
 }
 
 // im still not sure, maybe need to refactor to handle in inventory instead
-const alwaysHandledCommand = (command: Command) => {
+const alwaysPressedHandledCommand = (command: Command) => {
+  inModalCommand(command, true)
+  // triggered even outside of the game
   if (command === 'general.inventory') {
     if (activeModalStack.at(-1)?.reactType?.startsWith?.('player_win:')) { // todo?
       hideCurrentModal()
@@ -198,9 +293,25 @@ const alwaysHandledCommand = (command: Command) => {
   }
 }
 
+function cycleHotbarSlot (dir: 1 | -1) {
+  const newHotbarSlot = (bot.quickBarSlot + dir + 9) % 9
+  bot.setQuickBarSlot(newHotbarSlot)
+}
+
+// custom commands handler
+const customCommandsHandler = ({ command }) => {
+  const [section, name] = command.split('.')
+  if (!isGameActive(true) || section !== 'custom') return
+
+  if (contro.userConfig?.custom) {
+    customCommandsConfig[(contro.userConfig.custom[name] as CustomCommand).type].handler((contro.userConfig.custom[name] as CustomCommand).inputs)
+  }
+}
+contro.on('trigger', customCommandsHandler)
+
 contro.on('trigger', ({ command }) => {
   const willContinue = !isGameActive(true)
-  alwaysHandledCommand(command)
+  alwaysPressedHandledCommand(command)
   if (willContinue) return
 
   const secondActionCommand = secondActionCommands[command]
@@ -220,13 +331,28 @@ contro.on('trigger', ({ command }) => {
   onTriggerOrReleased(command, true)
 
   if (stringStartsWith(command, 'general')) {
-    // eslint-disable-next-line @typescript-eslint/switch-exhaustiveness-check
     switch (command) {
+      case 'general.jump':
+      case 'general.sneak':
+      case 'general.toggleSneakOrDown':
+      case 'general.sprint':
+      case 'general.attackDestroy':
+      case 'general.swapHands': {
+        bot._client.write('entity_action', {
+          entityId: bot.entity.id,
+          actionId: 6,
+          jumpBoost: 0
+        })
+        break
+      }
+      case 'general.interactPlace':
+        // handled in onTriggerOrReleased
+        break
       case 'general.inventory':
         document.exitPointerLock?.()
         openPlayerInventory()
         break
-      case 'general.drop':
+      case 'general.drop': {
         // if (bot.heldItem/* && ctrl */) bot.tossStack(bot.heldItem)
         bot._client.write('block_dig', {
           'status': 4,
@@ -238,7 +364,14 @@ contro.on('trigger', ({ command }) => {
           'face': 0,
           sequence: 0
         })
+        const slot = bot.inventory.hotbarStart + bot.quickBarSlot
+        const item = bot.inventory.slots[slot]
+        if (item) {
+          item.count--
+          bot.inventory.updateSlot(slot, item.count > 0 ? item : null!)
+        }
         break
+      }
       case 'general.chat':
         showModal({ reactType: 'chat' })
         break
@@ -248,6 +381,12 @@ contro.on('trigger', ({ command }) => {
         break
       case 'general.selectItem':
         void selectItem()
+        break
+      case 'general.nextHotbarSlot':
+        cycleHotbarSlot(1)
+        break
+      case 'general.prevHotbarSlot':
+        cycleHotbarSlot(-1)
         break
     }
   }
@@ -269,9 +408,14 @@ contro.on('trigger', ({ command }) => {
     window.history.replaceState({}, '', `${window.location.pathname}?${newQs}`)
     // return
   }
+
+  if (command === 'ui.pauseMenu') {
+    showModal({ reactType: 'pause-screen' })
+  }
 })
 
 contro.on('release', ({ command }) => {
+  inModalCommand(command, false)
   onTriggerOrReleased(command, false)
 })
 
@@ -309,13 +453,24 @@ export const f3Keybinds = [
     mobileTitle: 'Toggle chunk borders',
   },
   {
-    key: 'KeyT',
+    key: 'KeyY',
     async action () {
       // waypoints
       const widgetNames = widgets.map(widget => widget.name)
       const widget = await showOptionsModal('Open Widget', widgetNames)
       if (!widget) return
       showModal({ reactType: `widget-${widget}` })
+    },
+    mobileTitle: 'Open Widget'
+  },
+  {
+    key: 'KeyT',
+    async action () {
+      // TODO!
+      if (resourcePackState.resourcePackInstalled || loadedGameState.usingServerResourcePack) {
+        showNotification('Reloading textures...')
+        await completeTexturePackInstall('default', 'default')
+      }
     },
     mobileTitle: 'Open Widget'
   }
@@ -513,6 +668,24 @@ window.addEventListener('keydown', (e) => {
   }
 })
 
+window.addEventListener('keydown', (e) => {
+  if (e.code !== 'F2' || e.repeat || !isGameActive(true)) return
+  e.preventDefault()
+  const canvas = document.getElementById('viewer-canvas') as HTMLCanvasElement
+  if (!canvas) return
+  const link = document.createElement('a')
+  link.href = canvas.toDataURL('image/png')
+  const date = new Date()
+  link.download = `screenshot ${date.toLocaleString().replaceAll('.', '-').replace(',', '')}.png`
+  link.click()
+})
+
+window.addEventListener('keydown', (e) => {
+  if (e.code !== 'F1' || e.repeat || !isGameActive(true)) return
+  e.preventDefault()
+  miscUiState.showUI = !miscUiState.showUI
+})
+
 // #region experimental debug things
 window.addEventListener('keydown', (e) => {
   if (e.code === 'F11') {
@@ -524,3 +697,30 @@ window.addEventListener('keydown', (e) => {
   }
 })
 // #endregion
+
+export function updateBinds (commands: any) {
+  contro.inputSchema.commands.custom = Object.fromEntries(Object.entries(commands?.custom ?? {}).map(([key, value]) => {
+    return [key, {
+      keys: [],
+      gamepad: [],
+      type: '',
+      inputs: []
+    }]
+  }))
+
+  for (const [group, actions] of Object.entries(commands)) {
+    contro.userConfig![group] = Object.fromEntries(Object.entries(actions).map(([key, value]) => {
+      const newValue = {
+        keys: value?.keys ?? undefined,
+        gamepad: value?.gamepad ?? undefined,
+      }
+
+      if (group === 'custom') {
+        newValue['type'] = (value).type
+        newValue['inputs'] = (value).inputs
+      }
+
+      return [key, newValue]
+    }))
+  }
+}

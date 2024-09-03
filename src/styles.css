@@ -1,4 +1,5 @@
 @import url(./screens.css);
+@import url('pixelarticons/fonts/pixelart-icons-font.css');
 
 :root {
   --guiScaleFactor: 3;
@@ -18,6 +19,10 @@ a {
   color: white;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html {
   -webkit-tap-highlight-color: rgba(0, 0, 0, 0);
   height: 100vh;
@@ -25,12 +30,7 @@ html {
   color: white;
 }
 
-body {
-  --widgets-gui-atlas: url('minecraft-assets/minecraft-assets/data/1.17.1/gui/widgets.png');
-  --title-gui: url('minecraft-assets/minecraft-assets/data/1.17.1/gui/title/minecraft.png');
-}
-
-body.disable-assets {
+html.disable-assets {
   --widgets-gui-atlas: none;
   --title-gui: none;
 }
@@ -52,6 +52,7 @@ body {
   user-select: none;
   font-family: minecraft, mojangles, monospace;
   z-index: -5;
+  touch-action: none;
 }
 
 #react-root {
@@ -69,13 +70,14 @@ body {
   background: rgba(0, 0, 0, 0.3) !important;
   opacity: 0.7 !important;
   position: fixed !important;
+  bottom: 60px !important;
 }
 
 .dirt-bg {
   position: absolute;
   top: 0;
   left: 0;
-  background: url('minecraft-assets/minecraft-assets/data/1.17.1/gui/options_background.png'), rgba(0, 0, 0, 0.7);
+  background: url('mc-assets/dist/other-textures/latest/gui/options_background.png'), rgba(0, 0, 0, 0.7);
   background-size: 16px;
   background-repeat: repeat;
   width: 100%;
@@ -110,12 +112,12 @@ body {
 
 @font-face {
   font-family: minecraft;
-  src: url(minecraftia.woff);
+  src: url(../assets/minecraftia.woff);
 }
 
 @font-face {
   font-family: mojangles;
-  src: url(mojangles.ttf);
+  src: url(../assets/mojangles.ttf);
 }
 
 #ui-root {
@@ -135,6 +137,22 @@ body {
   -ms-interpolation-mode: nearest-neighbor;
 }
 
+.overlay-top-scaled, .overlay-bottom-scaled {
+  position: fixed;
+  inset: 0;
+  transform-origin: top left;
+  transform: scale(var(--guiScale));
+  width: calc(100% / var(--guiScale));
+  height: calc(100% / var(--guiScale));
+  z-index: 80;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+.overlay-bottom-scaled {
+  z-index: 1;
+}
+
 #viewer-canvas {
   position: fixed;
   top: 0;
@@ -147,6 +165,9 @@ body {
   animation-duration: 0.3s;
   animation-timing-function: ease-in-out;
   animation-fill-mode: forwards;
+}
+body::xr-overlay #viewer-canvas {
+  display: none;
 }
 
 .full-svg svg {
@@ -173,37 +194,5 @@ body {
   100% {
     transform: translateZ(0);
     opacity: 1;
-  }
-}
-
-@media only screen and (max-width: 971px) {
-  #ui-root {
-    transform: scale(2);
-    width: calc(100% / 2);
-    height: calc(100% / 2);
-  }
-}
-
-@media only screen and (max-height: 670px) {
-  #ui-root {
-    transform: scale(2);
-    width: calc(100% / 2);
-    height: calc(100% / 2);
-  }
-}
-
-@media only screen and (max-width: 590px) {
-  #ui-root {
-    transform: scale(1);
-    width: calc(100% / 1);
-    height: calc(100% / 1);
-  }
-}
-
-@media only screen and (max-height: 430px) {
-  #ui-root {
-    transform: scale(1.5);
-    width: calc(100% / 1.5);
-    height: calc(100% / 1.5);
   }
 }

@@ -8,7 +8,7 @@ import type { OptionsGroupType } from './optionsGuiScheme'
 
 const notHideableModalsWithoutForce = new Set(['app-status'])
 
-type Modal = ({ elem?: HTMLElement & Record<string, any> } & { reactType?: string })
+type Modal = ({ elem?: HTMLElement & Record<string, any> } & { reactType: string })
 
 type ContextMenuItem = { callback; label }
 
@@ -35,32 +35,18 @@ subscribe(activeModalStack, () => {
   }
 })
 
-export const customDisplayManageKeyword = 'custom'
-
-const defaultModalActions = {
-  show (modal: Modal) {
-    if (modal.elem) modal.elem.style.display = 'block'
-  },
-  hide (modal: Modal) {
-    if (modal.elem) modal.elem.style.display = 'none'
-  }
-}
-
 /**
  * @returns true if operation was successful
  */
 const showModalInner = (modal: Modal) => {
   const cancel = modal.elem?.show?.()
-  if (cancel && cancel !== customDisplayManageKeyword) return false
-  if (cancel !== 'custom') defaultModalActions.show(modal)
   return true
 }
 
-export const showModal = (elem: (HTMLElement & Record<string, any>) | { reactType: string }) => {
-  const resolved = elem instanceof HTMLElement ? { elem: ref(elem) } : elem
+export const showModal = (elem: /* (HTMLElement & Record<string, any>) |  */{ reactType: string }) => {
+  const resolved = elem
   const curModal = activeModalStack.at(-1)
-  if (elem === curModal?.elem || (elem.reactType && elem.reactType === curModal?.reactType) || !showModalInner(resolved)) return
-  if (curModal) defaultModalActions.hide(curModal)
+  if (/* elem === curModal?.elem ||  */(elem.reactType && elem.reactType === curModal?.reactType) || !showModalInner(resolved)) return
   activeModalStack.push(resolved)
 }
 
@@ -71,21 +57,21 @@ export const showModal = (elem: (HTMLElement & Record<string, any>) | { reactTyp
 export const hideModal = (modal = activeModalStack.at(-1), data: any = undefined, options: { force?: boolean; restorePrevious?: boolean } = {}) => {
   const { force = false, restorePrevious = true } = options
   if (!modal) return
-  let cancel
-  if (modal.elem) {
-    cancel = modal.elem.hide?.(data)
-  } else if (modal.reactType) {
-    cancel = notHideableModalsWithoutForce.has(modal.reactType) ? !force : undefined
-  }
-  if (force && cancel !== customDisplayManageKeyword) {
+  let cancel = notHideableModalsWithoutForce.has(modal.reactType) ? !force : undefined
+  if (force) {
     cancel = undefined
   }
 
-  if (!cancel || cancel === customDisplayManageKeyword) {
-    if (cancel !== customDisplayManageKeyword) defaultModalActions.hide(modal)
-    activeModalStack.pop()
+  if (!cancel) {
+    const lastModal = activeModalStack.at(-1)
+    for (let i = activeModalStack.length - 1; i >= 0; i--) {
+      if (activeModalStack[i].reactType === modal.reactType) {
+        activeModalStack.splice(i, 1)
+        break
+      }
+    }
     const newModal = activeModalStack.at(-1)
-    if (newModal && restorePrevious) {
+    if (newModal && lastModal !== newModal && restorePrevious) {
       // would be great to ignore cancel I guess?
       showModalInner(newModal)
     }
@@ -118,30 +104,38 @@ export const showContextmenu = (items: ContextMenuItem[], { clientX, clientY }) 
 // ---
 
 export type AppConfig = {
-  defaultHost?: string
-  defaultHostSave?: string
+  // defaultHost?: string
+  // defaultHostSave?: string
   defaultProxy?: string
-  defaultProxySave?: string
-  defaultVersion?: string
+  // defaultProxySave?: string
+  // defaultVersion?: string
+  promoteServers?: Array<{ ip, description, version? }>
   mapsProvider?: string
 }
 
 export const miscUiState = proxy({
   currentDisplayQr: null as string | null,
   currentTouch: null as boolean | null,
-  serverIp: null as string | null,
   hasErrors: false,
   singleplayer: false,
   flyingSquid: false,
   wanOpened: false,
   /** wether game hud is shown (in playing state) */
   gameLoaded: false,
+  showUI: true,
+  loadedServerIndex: '',
   /** currently trying to load or loaded mc version, after all data is loaded */
   loadedDataVersion: null as string | null,
   appLoaded: false,
   usingGamepadInput: false,
   appConfig: null as AppConfig | null,
   displaySearchInput: false,
+})
+
+export const loadedGameState = proxy({
+  username: '',
+  serverIp: '' as string | null,
+  usingServerResourcePack: false,
 })
 
 export const isGameActive = (foregroundCheck: boolean) => {

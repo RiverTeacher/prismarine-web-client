@@ -1,6 +1,6 @@
-import { CSSProperties, PointerEvent, PointerEventHandler, useEffect, useRef, useState } from 'react'
+import { CSSProperties, PointerEvent, useEffect, useRef } from 'react'
 import { proxy, ref, useSnapshot } from 'valtio'
-import { contro, setSneaking } from '../controls'
+import { contro } from '../controls'
 import worldInteractions from '../worldInteractions'
 import PixelartIcon from './PixelartIcon'
 import Button from './Button'
@@ -40,40 +40,46 @@ export const handleMovementStickDelta = (e?: { clientX, clientY }) => {
   }
 
   joystickPointer.joystickInner!.style.transform = `translate(${x}px, ${y}px)`
+  const vector = {
+    x: x / max,
+    y: 0,
+    z: y / max,
+  }
   void contro.emit('movementUpdate', {
-    vector: {
-      x: x / max,
-      y: 0,
-      z: y / max,
-    },
+    vector,
+    soleVector: vector
   })
 }
 
 export default ({ touchActive, setupActive, buttonsPositions, closeButtonsSetup }: Props) => {
+  const bot = window.bot as typeof __type_bot | undefined
   if (setupActive) touchActive = true
 
   const joystickOuter = useRef<HTMLDivElement>(null)
   const joystickInner = useRef<HTMLDivElement>(null)
 
   const { pointer } = useSnapshot(joystickPointer)
+  // const { isFlying, isSneaking } = useSnapshot(gameAdditionalState)
   const newButtonPositions = { ...buttonsPositions }
 
   const buttonProps = (name: ButtonName) => {
     let active = {
       action: false,
-      sneak: bot.getControlState('sneak'),
+      sneak: bot?.getControlState('sneak'),
       break: false,
-      jump: bot.getControlState('jump'),
+      jump: bot?.getControlState('jump'),
     }[name]
     const holdDown = {
       action () {
         document.dispatchEvent(new MouseEvent('mousedown', { button: 2 }))
         worldInteractions.update()
-        document.dispatchEvent(new MouseEvent('mouseup', { button: 2 }))
       },
       sneak () {
-        setSneaking(!bot.getControlState('sneak'))
-        active = bot.getControlState('sneak')
+        void contro.emit('trigger', {
+          command: 'general.toggleSneakOrDown',
+          schema: null as any,
+        })
+        active = bot?.getControlState('sneak')
       },
       break () {
         document.dispatchEvent(new MouseEvent('mousedown', { button: 0 }))
@@ -81,14 +87,23 @@ export default ({ touchActive, setupActive, buttonsPositions, closeButtonsSetup 
         active = true
       },
       jump () {
-        bot.setControlState('jump', true)
-        active = true
+        void contro.emit('trigger', {
+          command: 'general.jump',
+          schema: null as any,
+        })
+        active = bot?.controlState.jump
       }
     }
     const holdUp = {
       action () {
+        document.dispatchEvent(new MouseEvent('mouseup', { button: 2 }))
       },
       sneak () {
+        void contro.emit('release', {
+          command: 'general.toggleSneakOrDown',
+          schema: null as any,
+        })
+        active = bot?.getControlState('sneak')
       },
       break () {
         document.dispatchEvent(new MouseEvent('mouseup', { button: 0 }))
@@ -96,8 +111,11 @@ export default ({ touchActive, setupActive, buttonsPositions, closeButtonsSetup 
         active = false
       },
       jump () {
-        bot.setControlState('jump', false)
-        active = false
+        void contro.emit('release', {
+          command: 'general.jump',
+          schema: null as any,
+        })
+        active = bot?.controlState.jump
       }
     }
 
@@ -144,8 +162,8 @@ export default ({ touchActive, setupActive, buttonsPositions, closeButtonsSetup 
           const elem = e.currentTarget as HTMLElement
           const size = 32
           const scale = getCurrentAppScaling()
-          const xPerc = e.clientX / window.innerWidth * 100 - size / scale
-          const yPerc = e.clientY / window.innerHeight * 100 - size / scale
+          const xPerc = (e.clientX - size / 4 / scale) / window.innerWidth * 100
+          const yPerc = (e.clientY - size / 4 / scale) / window.innerHeight * 100
           elem.style.left = `${xPerc}%`
           elem.style.top = `${yPerc}%`
           newButtonPositions[name] = [xPerc, yPerc]
@@ -183,7 +201,8 @@ export default ({ touchActive, setupActive, buttonsPositions, closeButtonsSetup 
           left: `${pointer.x / window.innerWidth * 100}%`,
           top: `${pointer.y / window.innerHeight * 100}%`
         } : {}
-      }}>
+      }}
+    >
       <div
         className='movement_joystick_inner'
         style={{
@@ -214,13 +233,18 @@ export default ({ touchActive, setupActive, buttonsPositions, closeButtonsSetup 
       display: 'flex',
       justifyContent: 'center',
       gap: 3
-    }}>
+    }}
+    >
       <Button onClick={() => {
         closeButtonsSetup()
-      }}>Cancel</Button>
+      }}
+      >Cancel
+      </Button>
       <Button onClick={() => {
         closeButtonsSetup(newButtonPositions)
-      }}>Apply</Button>
+      }}
+      >Apply
+      </Button>
     </div>}
   </div>
 }

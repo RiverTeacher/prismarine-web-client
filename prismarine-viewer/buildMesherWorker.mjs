@@ -6,6 +6,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import fs from 'fs'
 import { dynamicMcDataFiles } from './buildMesherConfig.mjs'
+import { mesherSharedPlugins } from '../scripts/esbuildPlugins.mjs'
 
 const allowedBundleFiles = ['legacy', 'versions', 'protocolVersions', 'features']
 
@@ -34,6 +35,7 @@ const buildOptions = {
     'process.env.BROWSER': '"true"',
   },
   plugins: [
+    ...mesherSharedPlugins,
     {
       name: 'external-json',
       setup (build) {
@@ -106,6 +108,7 @@ const buildOptions = {
         })
         build.onEnd(({ metafile, outputFiles }) => {
           if (!metafile) return
+          fs.mkdirSync(path.join(__dirname, './public'), { recursive: true })
           fs.writeFileSync(path.join(__dirname, './public/metafile.json'), JSON.stringify(metafile))
           for (const outDir of ['../dist/', './public/']) {
             for (const outputFile of outputFiles) {
@@ -113,8 +116,9 @@ const buildOptions = {
                 // skip writing & browser loading sourcemap there, worker debugging should be done in playground
                 // continue
               }
-              fs.mkdirSync(outDir, { recursive: true })
-              fs.writeFileSync(path.join(__dirname, outDir, path.basename(outputFile.path)), outputFile.text)
+              const writePath = path.join(__dirname, outDir, path.basename(outputFile.path))
+              fs.mkdirSync(path.dirname(writePath), { recursive: true })
+              fs.writeFileSync(writePath, outputFile.text)
             }
           }
         })

@@ -2,10 +2,10 @@
 
 import { subscribeKey } from 'valtio/utils'
 import { WorldRendererThree } from 'prismarine-viewer/viewer/lib/worldrendererThree'
+import { isMobile } from 'prismarine-viewer/viewer/lib/simpleUtils'
 import { options, watchValue } from './optionsStorage'
 import { reloadChunks } from './utils'
 import { miscUiState } from './globalState'
-import { isMobile } from './menus/components/common'
 
 subscribeKey(options, 'renderDistance', reloadChunks)
 subscribeKey(options, 'multiplayerRenderDistance', reloadChunks)
@@ -41,10 +41,11 @@ export const watchOptionsAfterViewerInit = () => {
   })
 
   watchValue(options, o => {
-    viewer.entities.setVisible(o.renderEntities)
+    viewer.entities.setRendering(o.renderEntities)
   })
 
-  viewer.world.mesherConfig.smoothLighting = options.smoothLighting
+  // viewer.world.mesherConfig.smoothLighting = options.smoothLighting
+  viewer.world.mesherConfig.smoothLighting = false // todo not supported for now
   subscribeKey(options, 'smoothLighting', () => {
     viewer.world.mesherConfig.smoothLighting = options.smoothLighting;
     (viewer.world as WorldRendererThree).rerenderAllChunks()
@@ -55,5 +56,21 @@ export const watchOptionsAfterViewerInit = () => {
   })
   customEvents.on('gameLoaded', () => {
     viewer.world.mesherConfig.enableLighting = !bot.supportFeature('blockStateId') || options.newVersionsLighting
+  })
+
+  watchValue(options, o => {
+    if (!(viewer.world instanceof WorldRendererThree)) return
+    viewer.world.starField.enabled = o.starfieldRendering
+  })
+}
+
+let viewWatched = false
+export const watchOptionsAfterWorldViewInit = () => {
+  if (viewWatched) return
+  viewWatched = true
+  watchValue(options, o => {
+    if (!worldView) return
+    worldView.keepChunksDistance = o.keepChunksDistance
+    worldView.handDisplay = o.handDisplay
   })
 }

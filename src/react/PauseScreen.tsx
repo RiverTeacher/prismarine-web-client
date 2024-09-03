@@ -1,7 +1,9 @@
 import { join } from 'path'
+import fs from 'fs'
 import { useEffect } from 'react'
 import { useSnapshot } from 'valtio'
 import { usedServerPathsV1 } from 'flying-squid/dist/lib/modules/world'
+import { openURL } from 'prismarine-viewer/viewer/lib/simpleUtils'
 import {
   activeModalStack,
   showModal,
@@ -13,13 +15,14 @@ import { fsState } from '../loadSave'
 import { disconnect } from '../flyingSquidUtils'
 import { pointerLock, setLoadingScreenStatus } from '../utils'
 import { closeWan, openToWanAndCopyJoinLink, getJoinLink } from '../localServerMultiplayer'
-import { openURL } from '../menus/components/common'
-import { copyFilesAsyncWithProgress, mkdirRecursive, uniqueFileNameFromWorldName } from '../browserfs'
-import { useIsModalActive } from './utils'
+import { collectFilesToCopy, fileExistsAsyncOptimized, mkdirRecursive, uniqueFileNameFromWorldName } from '../browserfs'
+import { useIsModalActive } from './utilsApp'
 import { showOptionsModal } from './SelectOption'
 import Button from './Button'
 import Screen from './Screen'
 import styles from './PauseScreen.module.css'
+import { DiscordButton } from './DiscordButton'
+import { showNotification } from './NotificationProvider'
 
 export const saveToBrowserMemory = async () => {
   setLoadingScreenStatus('Saving world')
@@ -28,12 +31,46 @@ export const saveToBrowserMemory = async () => {
     const { worldFolder } = localServer.options
     const saveRootPath = await uniqueFileNameFromWorldName(worldFolder.split('/').pop(), `/data/worlds`)
     await mkdirRecursive(saveRootPath)
-    for (const copyPath of [...usedServerPathsV1, 'icon.png']) {
-      const srcPath = join(worldFolder, copyPath)
-      const savePath = join(saveRootPath, copyPath)
+    const allRootPaths = [...usedServerPathsV1]
+    const allFilesToCopy = [] as string[]
+    for (const dirBase of allRootPaths) {
       // eslint-disable-next-line no-await-in-loop
-      await copyFilesAsyncWithProgress(srcPath, savePath, false)
+      if (dirBase.includes('.') && await fileExistsAsyncOptimized(join(worldFolder, dirBase))) {
+        allFilesToCopy.push(dirBase)
+        continue
+      }
+      // eslint-disable-next-line no-await-in-loop
+      let res = await collectFilesToCopy(join(worldFolder, dirBase), true)
+      if (dirBase === 'region') {
+        res = res.filter(x => x.endsWith('.mca'))
+      }
+      allFilesToCopy.push(...res.map(x => join(dirBase, x)))
     }
+    const pathsSplit = allFilesToCopy.reduce((acc, cur, i) => {
+      if (i % 15 === 0) {
+        acc.push([])
+      }
+      acc.at(-1)!.push(cur)
+      return acc
+    // eslint-disable-next-line @typescript-eslint/prefer-reduce-type-parameter
+    }, [] as string[][])
+    let copied = 0
+    const upProgress = () => {
+      copied++
+      const action = fsState.remoteBackend ? 'Downloading & copying' : 'Copying'
+      setLoadingScreenStatus(`${action} files (${copied}/${allFilesToCopy.length})`)
+    }
+    for (const copyPaths of pathsSplit) {
+      // eslint-disable-next-line no-await-in-loop
+      await Promise.all(copyPaths.map(async (copyPath) => {
+        const srcPath = join(worldFolder, copyPath)
+        const savePath = join(saveRootPath, copyPath)
+        await mkdirRecursive(savePath)
+        await fs.promises.writeFile(savePath, await fs.promises.readFile(srcPath))
+        upProgress()
+      }))
+    }
+
     return saveRootPath
   } catch (err) {
     void showOptionsModal(`Error while saving the world: ${err.message}`, [])
@@ -43,6 +80,8 @@ export const saveToBrowserMemory = async () => {
 }
 
 export default () => {
+  const qsParams = new URLSearchParams(window.location.search)
+  const lockConnect = qsParams?.get('lockConnect') === 'true'
   const isModalActive = useIsModalActive('pause-screen')
   const fsStateSnap = useSnapshot(fsState)
   const activeModalStackSnap = useSnapshot(activeModalStack)
@@ -97,14 +136,21 @@ export default () => {
     }
     const action = await showOptionsModal('World actions...', ['Save to browser memory'])
     if (action === 'Save to browser memory') {
-      await saveToBrowserMemory()
+      const path = await saveToBrowserMemory()
+      if (!path) return
+      const saveName = path.split('/').at(-1)
+      showNotification(`World saved to ${saveName}`, 'Load it to keep your progress!')
+      // fsState.inMemorySave = true
+      // fsState.syncFs = false
+      // fsState.isReadonly = false
+      // fsState.remoteBackend = false
     }
   }
 
   if (!isModalActive) return null
   return <Screen title='Game Menu'>
     <Button
-      icon={'pixelarticons:folder'}
+      icon="pixelarticons:folder"
       style={{ position: 'fixed', top: '5px', left: 'calc(env(safe-area-inset-left) + 5px)' }}
       onClick={async () => openWorldActions()}
     />
@@ -112,7 +158,7 @@ export default () => {
       <Button className="button" style={{ width: '204px' }} onClick={onReturnPress}>Back to Game</Button>
       <div className={styles.row}>
         <Button className="button" style={{ width: '98px' }} onClick={() => openURL(process.env.GITHUB_URL!)}>GitHub</Button>
-        <Button className="button" style={{ width: '98px' }} onClick={() => openURL('https://discord.gg/4Ucm684Fq3')}>Discord</Button>
+        <DiscordButton />
       </div>
       <Button className="button" style={{ width: '204px' }} onClick={() => openOptionsMenu('main')}>Options</Button>
       {singleplayer ? (
@@ -123,22 +169,24 @@ export default () => {
           {(navigator.share as typeof navigator.share | undefined) ? (
             <Button
               className="button"
-              icon={'pixelarticons:arrow-up'}
+              icon="pixelarticons:arrow-up"
               style={{ width: '20px' }}
               onClick={async () => clickWebShareButton()}
             />
           ) : null}
           <Button
             className="button"
-            icon={'pixelarticons:dice'}
+            icon="pixelarticons:dice"
             style={{ width: '20px' }}
             onClick={async () => clickJoinLinkButton(true)}
           />
         </div>
       ) : null}
-      <Button className="button" style={{ width: '204px' }} onClick={disconnect}>
-        {localServer && !fsState.syncFs && !fsState.isReadonly ? 'Save & Quit' : 'Disconnect'}
-      </Button>
+      {!lockConnect && <>
+        <Button className="button" style={{ width: '204px' }} onClick={disconnect}>
+          {localServer && !fsState.syncFs && !fsState.isReadonly ? 'Save & Quit' : 'Disconnect & Reset'}
+        </Button>
+      </>}
     </div>
   </Screen>
 }

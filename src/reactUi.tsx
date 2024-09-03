@@ -4,7 +4,7 @@ import { useSnapshot } from 'valtio'
 import { QRCodeSVG } from 'qrcode.react'
 import { createPortal } from 'react-dom'
 import { useEffect, useMemo, useState } from 'react'
-import { miscUiState } from './globalState'
+import { activeModalStack, miscUiState } from './globalState'
 import DeathScreenProvider from './react/DeathScreenProvider'
 import OptionsRenderApp from './react/OptionsRenderApp'
 import MainMenuRenderApp from './react/MainMenuRenderApp'
@@ -27,12 +27,21 @@ import PauseScreen from './react/PauseScreen'
 import SoundMuffler from './react/SoundMuffler'
 import TouchControls from './react/TouchControls'
 import widgets from './react/widgets'
-import { useIsWidgetActive } from './react/utils'
-import GlobalSearchInput from './GlobalSearchInput'
+import { useIsWidgetActive } from './react/utilsApp'
+import GlobalSearchInput from './react/GlobalSearchInput'
 import TouchAreasControlsProvider from './react/TouchAreasControlsProvider'
 import NotificationProvider, { showNotification } from './react/NotificationProvider'
 import HotbarRenderApp from './react/HotbarRenderApp'
 import Crosshair from './react/Crosshair'
+import ButtonAppProvider from './react/ButtonAppProvider'
+import ServersListProvider from './react/ServersListProvider'
+import GamepadUiCursor from './react/GamepadUiCursor'
+import KeybindingsScreenProvider from './react/KeybindingsScreenProvider'
+import HeldMapUi from './react/HeldMapUi'
+import BedTime from './react/BedTime'
+import NoModalFoundProvider from './react/NoModalFoundProvider'
+import SignInMessageProvider from './react/SignInMessageProvider'
+import BookProvider from './react/BookProvider'
 
 const RobustPortal = ({ children, to }) => {
   return createPortal(<PerComponentErrorBoundary>{children}</PerComponentErrorBoundary>, to)
@@ -82,37 +91,50 @@ const GameHud = ({ children }) => {
   return gameLoaded ? children : null
 }
 
-const InGameUi = () => {
+const InGameComponent = ({ children }) => {
   const { gameLoaded } = useSnapshot(miscUiState)
-  if (!gameLoaded) return
+  if (!gameLoaded) return null
+  return children
+}
+
+const InGameUi = () => {
+  const { gameLoaded, showUI: showUIRaw } = useSnapshot(miscUiState)
+  const hasModals = useSnapshot(activeModalStack).length > 0
+  const showUI = showUIRaw || hasModals
+  if (!gameLoaded || !bot) return
 
   return <>
     <RobustPortal to={document.querySelector('#ui-root')}>
       {/* apply scaling */}
-      <DeathScreenProvider />
-      <DebugOverlay />
-      <MobileTopButtons />
-      <PlayerListOverlayProvider />
-      <ChatProvider />
-      <SoundMuffler />
-      <TitleProvider />
-      <ScoreboardProvider />
-      <IndicatorEffectsProvider />
-      <TouchAreasControlsProvider />
-      <Crosshair />
+      <div style={{ display: showUI ? 'block' : 'none' }}>
+        <DeathScreenProvider />
+        <DebugOverlay />
+        <MobileTopButtons />
+        <PlayerListOverlayProvider />
+        <ChatProvider />
+        <SoundMuffler />
+        <TitleProvider />
+        <ScoreboardProvider />
+        <IndicatorEffectsProvider />
+        <Crosshair />
+        <BookProvider />
+      </div>
 
       <PauseScreen />
-      <XPBarProvider />
-      <HudBarsProvider />
-      <HotbarRenderApp />
+      <div style={{ display: showUI ? 'block' : 'none' }}>
+        <XPBarProvider />
+        <HudBarsProvider />
+        <BedTime />
+      </div>
+      {showUI && <HotbarRenderApp />}
     </RobustPortal>
     <PerComponentErrorBoundary>
       <SignEditorProvider />
       <DisplayQr />
     </PerComponentErrorBoundary>
     <RobustPortal to={document.body}>
-      {/* becaues of z-index */}
-      <TouchControls />
+      {/* because of z-index */}
+      {showUI && <TouchControls />}
       <GlobalSearchInput />
     </RobustPortal>
   </>
@@ -131,29 +153,56 @@ const WidgetDisplay = ({ name, Component }) => {
 
 const App = () => {
   return <div>
-    <EnterFullscreenButton />
-    <InGameUi />
-    <RobustPortal to={document.querySelector('#ui-root')}>
-      <AllWidgets />
-      <SingleplayerProvider />
-      <CreateWorldProvider />
-      <AppStatusProvider />
-      <SelectOption />
-      <OptionsRenderApp />
-      <MainMenuRenderApp />
-      <NotificationProvider />
-      {/* <GameHud>
-      </GameHud> */}
-    </RobustPortal>
+    <ButtonAppProvider>
+      <RobustPortal to={document.body}>
+        <div className='overlay-bottom-scaled'>
+          <InGameComponent>
+            <HeldMapUi />
+          </InGameComponent>
+        </div>
+        <div />
+      </RobustPortal>
+      <EnterFullscreenButton />
+      <InGameUi />
+      <RobustPortal to={document.querySelector('#ui-root')}>
+        <AllWidgets />
+        <SingleplayerProvider />
+        <CreateWorldProvider />
+        <AppStatusProvider />
+        <KeybindingsScreenProvider />
+        <SelectOption />
+        <ServersListProvider />
+        <OptionsRenderApp />
+        <MainMenuRenderApp />
+        <NotificationProvider />
+        <TouchAreasControlsProvider />
+        <SignInMessageProvider />
+        <NoModalFoundProvider />
+        {/* <GameHud>
+        </GameHud> */}
+      </RobustPortal>
+      <RobustPortal to={document.body}>
+        {/* todo correct mounting! */}
+        <div className='overlay-top-scaled'>
+          <GamepadUiCursor />
+        </div>
+        <div />
+      </RobustPortal>
+    </ButtonAppProvider>
   </div>
 }
 
 const PerComponentErrorBoundary = ({ children }) => {
-  return children.map((child, i) => <ErrorBoundary key={i} renderError={(error) => {
-    const componentNameClean = (child.type.name || child.type.displayName || 'Unknown').replaceAll(/__|_COMPONENT/g, '')
-    showNotification(`UI component ${componentNameClean} crashed!`, 'Please report this. Use console to see more info.', true, undefined)
-    return null
-  }}>{child}</ErrorBoundary>)
+  return children.map((child, i) => <ErrorBoundary
+    key={i}
+    renderError={(error) => {
+      const componentNameClean = (child.type.name || child.type.displayName || 'Unknown').replaceAll(/__|_COMPONENT/g, '')
+      showNotification(`UI component ${componentNameClean} crashed!`, 'Please report this. Use console for more.', true, undefined)
+      return null
+    }}
+  >
+    {child}
+  </ErrorBoundary>)
 }
 
 renderToDom(<App />, {

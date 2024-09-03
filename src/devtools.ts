@@ -23,3 +23,35 @@ Object.defineProperty(window, 'debugSceneChunks', {
     return (viewer.world as WorldRendererThree).getLoadedChunksRelative?.(bot.entity.position, true)
   },
 })
+
+window.len = (obj) => Object.keys(obj).length
+
+window.inspectPacket = (packetName, full = false) => {
+  const listener = (...args) => console.log('packet', packetName, full ? args : args[0])
+  const attach = () => {
+    bot?._client.on(packetName, listener)
+  }
+  attach()
+  customEvents.on('mineflayerBotCreated', attach)
+  const returnobj = {}
+  Object.defineProperty(returnobj, 'detach', {
+    get () {
+      bot?.removeListener(packetName, listener)
+      customEvents.removeListener('mineflayerBotCreated', attach)
+      return true
+    },
+  })
+  return returnobj
+}
+
+// for advanced debugging, use with watch expression
+
+let stats_ = {}
+window.addStatHit = (key) => {
+  stats_[key] ??= 0
+  stats_[key]++
+}
+setInterval(() => {
+  window.stats = stats_
+  stats_ = {}
+}, 1000)

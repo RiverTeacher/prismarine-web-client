@@ -4,7 +4,7 @@ import { noCase } from 'change-case'
 import mojangson from 'mojangson'
 import { openURL } from 'prismarine-viewer/viewer/lib/simpleUtils'
 import { MessageFormatPart } from '../botUtils'
-import { chatInputValueGlobal } from './ChatContainer'
+import { chatInputValueGlobal } from './Chat'
 import './MessageFormatted.css'
 
 const hoverItemToText = (hoverEvent: MessageFormatPart['hoverEvent']) => {
@@ -78,14 +78,14 @@ export const MessagePart = ({ part, ...props }: { part: MessageFormatPart } & Co
     underlined && messageFormatStylesMap.underlined,
     strikethrough && messageFormatStylesMap.strikethrough,
     obfuscated && messageFormatStylesMap.obfuscated
-  ].filter(Boolean)
+  ].filter(a => a !== false && a !== undefined).filter(Boolean)
 
   return <span title={hoverItemText} style={parseInlineStyle(applyStyles.join(' '))} {...clickProps} {...props}>{text}</span>
 }
 
-export default ({ parts }: { parts: readonly MessageFormatPart[] }) => {
+export default ({ parts, className }: { parts: readonly MessageFormatPart[], className?: string }) => {
   return (
-    <span className='formatted-message'>
+    <span className={`formatted-message ${className ?? ''}`}>
       {parts.map((part, i) => <MessagePart key={i} part={part} />)}
     </span>
   )
@@ -137,5 +137,5 @@ export const messageFormatStylesMap = {
   strikethrough: 'text-decoration:line-through',
   underlined: 'text-decoration:underline',
   italic: 'font-style:italic',
-  obfuscated: 'color: #222326;background-color: #222326;'
+  obfuscated: 'filter:blur(2px)',
 }

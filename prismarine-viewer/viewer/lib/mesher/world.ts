@@ -1,8 +1,10 @@
 import Chunks from 'prismarine-chunk'
 import mcData from 'minecraft-data'
-import { Block } from "prismarine-block"
+import { Block } from 'prismarine-block'
 import { Vec3 } from 'vec3'
+import { WorldBlockProvider } from 'mc-assets/dist/worldBlockProvider'
 import moreBlockDataGeneratedJson from '../moreBlockDataGenerated.json'
+import legacyJson from '../../../../src/preflatMap.json'
 import { defaultMesherConfig } from './shared'
 
 const ignoreAoBlocks = Object.keys(moreBlockDataGeneratedJson.noOcclusions)
@@ -17,10 +19,15 @@ function isCube (shapes) {
   return shape[0] === 0 && shape[1] === 0 && shape[2] === 0 && shape[3] === 1 && shape[4] === 1 && shape[5] === 1
 }
 
-export type WorldBlock = Block & {
-  variant?: any
+export type BlockModelPartsResolved = ReturnType<WorldBlockProvider['getAllResolvedModels0_1']>
+
+export type WorldBlock = Omit<Block, 'position'> & {
   // todo
   isCube: boolean
+  /** cache */
+  models?: BlockModelPartsResolved | null
+  _originalProperties?: Record<string, any>
+  _properties?: Record<string, any>
 }
 
 
@@ -30,14 +37,16 @@ export class World {
   columns = {} as { [key: string]: import('prismarine-chunk/types/index').PCChunk }
   blockCache = {}
   biomeCache: { [id: number]: mcData.Biome }
+  preflat: boolean
 
-  constructor(version) {
+  constructor (version) {
     this.Chunk = Chunks(version) as any
     this.biomeCache = mcData(version).biomes
+    this.preflat = !mcData(version).supportFeature('blockStateId')
     this.config.version = version
   }
 
-  getLight (pos: Vec3, isNeighbor = false) {
+  getLight (pos: Vec3, isNeighbor = false, skipMoreChecks = false, curBlockName = '') {
     const { enableLighting, skyLight } = this.config
     if (!enableLighting) return 15
     // const key = `${pos.x},${pos.y},${pos.z}`
@@ -52,8 +61,17 @@ export class World {
       ) + 2
     )
     // lightsCache.set(key, result)
-    if (result === 2 && this.getBlock(pos)?.name.match(/_stairs|slab/)) { // todo this is obviously wrong
-      result = this.getLight(pos.offset(0, 1, 0))
+    if (result === 2 && [this.getBlock(pos)?.name ?? '', curBlockName].some(x => /_stairs|slab|glass_pane/.exec(x)) && !skipMoreChecks) { // todo this is obviously wrong
+      const lights = [
+        this.getLight(pos.offset(0, 1, 0), undefined, true),
+        this.getLight(pos.offset(0, -1, 0), undefined, true),
+        this.getLight(pos.offset(0, 0, 1), undefined, true),
+        this.getLight(pos.offset(0, 0, -1), undefined, true),
+        this.getLight(pos.offset(1, 0, 0), undefined, true),
+        this.getLight(pos.offset(-1, 0, 0), undefined, true)
+      ].filter(x => x !== 2)
+      const min = Math.min(...lights)
+      result = min
     }
     if (isNeighbor && result === 2) result = 15 // TODO
     return result
@@ -91,6 +109,8 @@ export class World {
   }
 
   getBlock (pos: Vec3): WorldBlock | null {
+    // for easier testing
+    if (!(pos instanceof Vec3)) pos = new Vec3(...pos as [number, number, number])
     const key = columnKey(Math.floor(pos.x / 16) * 16, Math.floor(pos.z / 16) * 16)
 
     const column = this.columns[key]
@@ -111,9 +131,30 @@ export class World {
           throw new Error('position is not reliable, use pos parameter instead of block.position')
         }
       })
+      if (this.preflat) {
+        //@ts-expect-error
+        b._properties = {}
+
+        const namePropsStr = legacyJson.blocks[b.type + ':' + b.metadata] || findClosestLegacyBlockFallback(b.type, b.metadata, pos)
+        if (namePropsStr) {
+          b.name = namePropsStr.split('[')[0]
+          const propsStr = namePropsStr.split('[')?.[1]?.split(']')
+          if (propsStr) {
+            const newProperties = Object.fromEntries(propsStr.join('').split(',').map(x => {
+              let [key, val] = x.split('=')
+              if (!isNaN(val)) val = parseInt(val, 10)
+              return [key, val]
+            }))
+            //@ts-expect-error
+            b._properties = newProperties
+          }
+        }
+      }
     }
 
     const block = this.blockCache[stateId]
+    if (block.name === 'flowing_water') block.name = 'water'
+    if (block.name === 'flowing_lava') block.name = 'lava'
     // block.position = loc // it overrides position of all currently loaded blocks
     block.biome = this.biomeCache[column.getBiome(locInChunk)] ?? this.biomeCache[1] ?? this.biomeCache[0]
     if (block.name === 'redstone_ore') block.transparent = false
@@ -125,10 +166,21 @@ export class World {
   }
 }
 
+const findClosestLegacyBlockFallback = (id, metadata, pos) => {
+  console.warn(`[mesher] Unknown block with ${id}:${metadata} at ${pos}, falling back`) // todo has known issues
+  for (const [key, value] of Object.entries(legacyJson.blocks)) {
+    const [idKey, meta] = key.split(':')
+    if (idKey === id) return value
+  }
+  return null
+}
+
 // todo export in chunk instead
 const hasChunkSection = (column, pos) => {
   if (column._getSection) return column._getSection(pos)
-  if (column.skyLightSections) return column.skyLightSections[getLightSectionIndex(pos, column.minY)]
+  if (column.skyLightSections) {
+    return column.skyLightSections[getLightSectionIndex(pos, column.minY)] || column.blockLightSections[getLightSectionIndex(pos, column.minY)]
+  }
   if (column.sections) return column.sections[pos.y >> 4]
 }
 

@@ -1,26 +1,24 @@
+//@ts-check
 import * as fs from 'fs'
 import fsExtra from 'fs-extra'
 
-//@ts-check
 import * as esbuild from 'esbuild'
 import { polyfillNode } from 'esbuild-plugin-polyfill-node'
 import path, { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
+import childProcess from 'child_process'
+import supportedVersions from '../src/supportedVersions.mjs'
 
 const dev = process.argv.includes('-w')
 
 const __dirname = path.dirname(fileURLToPath(new URL(import.meta.url)))
 
-const mcDataPath = join(__dirname, '../dist/mc-data')
+const mcDataPath = join(__dirname, '../generated/minecraft-data-optimized.json')
 if (!fs.existsSync(mcDataPath)) {
-  // shouldn't it be in the viewer instead?
-  await import('../scripts/prepareData.mjs')
+  childProcess.execSync('tsx ../scripts/makeOptimizedMcData.mjs', { stdio: 'inherit', cwd: __dirname })
 }
 
-fs.mkdirSync(join(__dirname, 'public'), { recursive: true })
 fs.copyFileSync(join(__dirname, 'playground.html'), join(__dirname, 'public/index.html'))
-fsExtra.copySync(mcDataPath, join(__dirname, 'public/mc-data'))
-const availableVersions = fs.readdirSync(mcDataPath).map(ver => ver.replace('.js', ''))
 
 /** @type {import('esbuild').BuildOptions} */
 const buildOptions = {
@@ -38,7 +36,7 @@ const buildOptions = {
   ],
   keepNames: true,
   banner: {
-    js: `globalThis.global = globalThis;globalThis.includedVersions = ${JSON.stringify(availableVersions)};`,
+    js: `globalThis.global = globalThis;globalThis.includedVersions = ${JSON.stringify(supportedVersions)};`,
   },
   alias: {
     events: 'events',
@@ -47,6 +45,7 @@ const buildOptions = {
     http: 'http-browserify',
     stream: 'stream-browserify',
     net: 'net-browserify',
+    // 'mc-assets': '/Users/vitaly/Documents/mc-assets',
   },
   inject: [],
   metafile: true,
@@ -57,19 +56,20 @@ const buildOptions = {
   plugins: [
     {
       name: 'minecraft-data',
-      setup (build) {
+      setup(build) {
         build.onLoad({
           filter: /minecraft-data[\/\\]data.js$/,
         }, () => {
           const defaultVersionsObj = {}
           return {
-            contents: `window.mcData ??= ${JSON.stringify(defaultVersionsObj)};module.exports = { pc: window.mcData }`,
-            loader: 'js',
+            contents: fs.readFileSync(join(__dirname, '../src/shims/minecraftData.ts'), 'utf8'),
+            loader: 'ts',
+            resolveDir: join(__dirname, '../src/shims'),
           }
         })
         build.onEnd((e) => {
           if (e.errors.length) return
-          fs.writeFileSync(join(__dirname, 'public/metafile.json'), JSON.stringify(e.metafile), 'utf8')
+          fs.writeFileSync(join(__dirname, './public/metafile.json'), JSON.stringify(e.metafile), 'utf8')
         })
       }
     },

@@ -1,4 +1,5 @@
 import { Entity } from 'prismarine-entity'
+import { versionToNumber } from 'prismarine-viewer/viewer/prepare/utils'
 import tracker from '@nxg-org/mineflayer-tracker'
 import { loader as autoJumpPlugin } from '@nxg-org/mineflayer-auto-jump'
 import { subscribeKey } from 'valtio/utils'
@@ -14,6 +15,7 @@ const updateAutoJump = () => {
     jumpOnAllEdges: options.autoParkour,
     // strictBlockCollision: true,
   })
+  if (autoJump === bot.autoJumper.enabled) return
   if (autoJump) {
     bot.autoJumper.enable()
   } else {
@@ -58,7 +60,11 @@ customEvents.on('gameLoaded', () => {
     }
   }
 
+  let lastCall = 0
   bot.on('physicsTick', () => {
+    // throttle, tps: 6
+    if (Date.now() - lastCall < 166) return
+    lastCall = Date.now()
     for (const [id, { tracking, info }] of Object.entries(bot.tracker.trackingData)) {
       if (!tracking) continue
       const e = bot.entities[id]
@@ -80,6 +86,21 @@ customEvents.on('gameLoaded', () => {
   bot.on('entitySwingArm', (e) => {
     if (viewer.entities.entities[e.id]?.playerObject) {
       viewer.entities.playAnimation(e.id, 'oneSwing')
+    }
+  })
+
+  bot._client.on('damage_event', (data) => {
+    const { entityId, sourceTypeId: damage } = data
+    if (viewer.entities.entities[entityId]) {
+      viewer.entities.handleDamageEvent(entityId, damage)
+    }
+  })
+
+  bot._client.on('entity_status', (data) => {
+    if (versionToNumber(bot.version) >= versionToNumber('1.19.4')) return
+    const { entityId, entityStatus } = data
+    if (entityStatus === 2 && viewer.entities.entities[entityId]) {
+      viewer.entities.handleDamageEvent(entityId, entityStatus)
     }
   })
 

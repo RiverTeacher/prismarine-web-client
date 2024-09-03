@@ -1,16 +1,17 @@
-import { supportedVersions } from 'flying-squid/dist/lib/version'
 import { hideCurrentModal, showModal } from '../globalState'
 import defaultLocalServerOptions from '../defaultLocalServerOptions'
 import { mkdirRecursive, uniqueFileNameFromWorldName } from '../browserfs'
+import supportedVersions from '../supportedVersions.mjs'
 import CreateWorld, { WorldCustomize, creatingWorldState } from './CreateWorld'
-import { useIsModalActive } from './utils'
 import { getWorldsPath } from './SingleplayerProvider'
+import { useIsModalActive } from './utilsApp'
 
 export default () => {
   const activeCreate = useIsModalActive('create-world')
   const activeCustomize = useIsModalActive('customize-world')
   if (activeCreate) {
-    const versions = supportedVersions.map(x => {
+    const versionsPerMinor = Object.fromEntries(supportedVersions.map(x => [x.split('.').slice(0, 2), x]))
+    const versions = Object.values(versionsPerMinor).map(x => {
       return {
         version: x,
         label: x === defaultLocalServerOptions.version ? `${x} (available offline)` : x
@@ -23,7 +24,7 @@ export default () => {
       }}
       createClick={async () => {
         // create new world
-        const { title, type, version } = creatingWorldState
+        const { title, type, version, gameMode } = creatingWorldState
         // todo display path in ui + disable if exist
         const savePath = await uniqueFileNameFromWorldName(title, getWorldsPath())
         await mkdirRecursive(savePath)
@@ -51,7 +52,8 @@ export default () => {
             levelName: title,
             version,
             generation,
-            'worldFolder': savePath
+            'worldFolder': savePath,
+            gameMode: gameMode === 'survival' ? 0 : 1,
           },
         }))
       }}

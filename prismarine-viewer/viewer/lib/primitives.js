@@ -1,8 +1,9 @@
+/* eslint-disable unicorn/no-abusive-eslint-disable */
+/* eslint-disable */
 const THREE = require('three')
 const { MeshLine, MeshLineMaterial } = require('three.meshline')
-const { dispose3 } = require('./dispose')
 
-function getMesh (primitive, camera) {
+function getMesh(primitive, camera) {
   if (primitive.type === 'line') {
     const color = primitive.color ? primitive.color : 0xff0000
     const resolution = new THREE.Vector2(window.innerWidth / camera.zoom, window.innerHeight / camera.zoom)
@@ -48,24 +49,24 @@ function getMesh (primitive, camera) {
 }
 
 class Primitives {
-  constructor (scene, camera) {
+  constructor(scene, camera) {
     this.scene = scene
     this.camera = camera
     this.primitives = {}
   }
 
-  clear () {
+  clear() {
     for (const mesh of Object.values(this.primitives)) {
       this.scene.remove(mesh)
-      dispose3(mesh)
+      disposeObject(mesh)
     }
     this.primitives = {}
   }
 
-  update (primitive) {
+  update(primitive) {
     if (this.primitives[primitive.id]) {
       this.scene.remove(this.primitives[primitive.id])
-      dispose3(this.primitives[primitive.id])
+      disposeObject(this.primitives[primitive.id])
       delete this.primitives[primitive.id]
     }
 
@@ -76,7 +77,7 @@ class Primitives {
   }
 }
 
-function GridBoxGeometry (geometry, independent) {
+function GridBoxGeometry(geometry, independent) {
   if (!(geometry instanceof THREE.BoxBufferGeometry)) {
     console.log("GridBoxGeometry: the parameter 'geometry' has to be of the type THREE.BoxBufferGeometry")
     return geometry
@@ -114,7 +115,7 @@ function GridBoxGeometry (geometry, independent) {
 
   newGeometry.setIndex(fullIndices)
 
-  function indexSide (x, y, shift) {
+  function indexSide(x, y, shift) {
     const indices = []
     for (let i = 0; i < y + 1; i++) {
       let index11 = 0

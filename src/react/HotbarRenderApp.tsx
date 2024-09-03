@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Transition } from 'react-transition-group'
 import { createPortal } from 'react-dom'
 import { subscribe, useSnapshot } from 'valtio'
-import { getItemNameRaw, openItemsCanvas, openPlayerInventory, upInventoryItems } from '../inventoryWindows'
+import { allImagesLoadedState, getItemNameRaw, openItemsCanvas, openPlayerInventory, upInventoryItems } from '../inventoryWindows'
 import { activeModalStack, isGameActive, miscUiState } from '../globalState'
 import { currentScaling } from '../scaleInterface'
 import { watchUnloadForCleanup } from '../gameUnload'
@@ -19,7 +19,7 @@ const ItemName = ({ itemKey }: { itemKey: string }) => {
 
   const defaultStyle: React.CSSProperties = {
     position: 'fixed',
-    bottom: `calc(var(--safe-area-inset-bottom) + ${bot ? bot.game.gameMode === 'creative' ? '35px' : '50px' : '50px'})`,
+    bottom: `calc(env(safe-area-inset-bottom) + ${bot ? bot.game.gameMode === 'creative' ? '40px' : '50px' : '50px'})`,
     left: 0,
     right: 0,
     fontSize: 10,
@@ -88,12 +88,12 @@ export default () => {
           return
         }
         const hotbarSlot = slot - bot.inventory.hotbarStart
-        if (hotbarSlot < 0 || hotbarSlot > 9) return
+        if (hotbarSlot < 0 || hotbarSlot > 8) return
         bot.setQuickBarSlot(hotbarSlot)
       },
     } as any)
     const { canvasManager } = inv
-    inv.inventory.supportsOffhand = bot.supportFeature('doesntHaveOffHandSlot')
+    inv.inventory.supportsOffhand = !bot.supportFeature('doesntHaveOffHandSlot')
     inv.pwindow.disablePicking = true
 
     canvasManager.children[0].disableHighlight = true
@@ -108,16 +108,17 @@ export default () => {
     }
     setSize()
     watchUnloadForCleanup(subscribe(currentScaling, setSize))
+    inv.canvas.style.pointerEvents = 'auto'
     container.current.appendChild(inv.canvas)
     const upHotbarItems = () => {
-      if (!viewer.world.downloadedTextureImage && !viewer.world.customTexturesDataUrl) return
+      if (!viewer.world.currentTextureImage || !allImagesLoadedState.value) return
       upInventoryItems(true, inv)
     }
 
-    canvasManager.canvas.onpointerdown = (e) => {
+    canvasManager.canvas.onclick = (e) => {
       if (!isGameActive(true)) return
       const pos = inv.canvasManager.getMousePos(inv.canvas, e)
-      if (pos.x > canvasManager.canvas.width - 30) {
+      if (canvasManager.canvas.width - pos.x < 35 * inv.canvasManager.scale) {
         openPlayerInventory()
       }
     }
@@ -125,7 +126,9 @@ export default () => {
     upHotbarItems()
     bot.inventory.on('updateSlot', upHotbarItems)
     viewer.world.renderUpdateEmitter.on('textureDownloaded', upHotbarItems)
-    viewer.world.renderUpdateEmitter.on('blockStatesDownloaded', upHotbarItems)
+    const unsub2 = subscribe(allImagesLoadedState, () => {
+      upHotbarItems()
+    })
 
     const setSelectedSlot = (index: number) => {
       if (index === bot.quickBarSlot) return
@@ -135,7 +138,10 @@ export default () => {
     const heldItemChanged = () => {
       inv.inventory.activeHotbarSlot = bot.quickBarSlot
 
-      if (!bot.inventory.slots?.[bot.quickBarSlot + 36]) return
+      if (!bot.inventory.slots?.[bot.quickBarSlot + 36]) {
+        setItemKey('')
+        return
+      }
       const item = bot.inventory.slots[bot.quickBarSlot + 36]!
       const itemNbt = item.nbt ? JSON.stringify(item.nbt) : ''
       setItemKey(`${item.displayName}_split_${item.type}_split_${item.metadata}_split_${itemNbt}`)
@@ -191,25 +197,26 @@ export default () => {
     return () => {
       inv.destroy()
       controller.abort()
+      unsub2()
       viewer.world.renderUpdateEmitter.off('textureDownloaded', upHotbarItems)
-      viewer.world.renderUpdateEmitter.off('blockStatesDownloaded', upHotbarItems)
     }
   }, [])
 
   return <SharedHudVars>
     <ItemName itemKey={itemKey} />
     <Portal>
-      <SharedHudVars>
-        <div className='hotbar' ref={container} style={{
+      <div
+        className='hotbar' ref={container} style={{
           position: 'fixed',
-          bottom: 'calc(var(--safe-area-inset-bottom) * 2)',
           left: 0,
           right: 0,
           display: 'flex',
           justifyContent: 'center',
           zIndex: hasModals ? 1 : 8,
-        }} />
-      </SharedHudVars>
+          pointerEvents: 'none',
+          bottom: 'var(--hud-bottom-raw)'
+        }}
+      />
     </Portal>
   </SharedHudVars>
 }

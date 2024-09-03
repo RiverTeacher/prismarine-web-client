@@ -1,22 +1,27 @@
 //@ts-check
 
-// wouldn't better to create atlas instead?
-import destroyStage0 from 'minecraft-assets/minecraft-assets/data/1.10/blocks/destroy_stage_0.png'
-import destroyStage1 from 'minecraft-assets/minecraft-assets/data/1.10/blocks/destroy_stage_1.png'
-import destroyStage2 from 'minecraft-assets/minecraft-assets/data/1.10/blocks/destroy_stage_2.png'
-import destroyStage3 from 'minecraft-assets/minecraft-assets/data/1.10/blocks/destroy_stage_3.png'
-import destroyStage4 from 'minecraft-assets/minecraft-assets/data/1.10/blocks/destroy_stage_4.png'
-import destroyStage5 from 'minecraft-assets/minecraft-assets/data/1.10/blocks/destroy_stage_5.png'
-import destroyStage6 from 'minecraft-assets/minecraft-assets/data/1.10/blocks/destroy_stage_6.png'
-import destroyStage7 from 'minecraft-assets/minecraft-assets/data/1.10/blocks/destroy_stage_7.png'
-import destroyStage8 from 'minecraft-assets/minecraft-assets/data/1.10/blocks/destroy_stage_8.png'
-import destroyStage9 from 'minecraft-assets/minecraft-assets/data/1.10/blocks/destroy_stage_9.png'
+import * as THREE from 'three'
 
+// wouldn't better to create atlas instead?
 import { Vec3 } from 'vec3'
 import { LineMaterial, Wireframe, LineSegmentsGeometry } from 'three-stdlib'
-import { isGameActive } from './globalState'
+import { Entity } from 'prismarine-entity'
+import destroyStage0 from '../assets/destroy_stage_0.png'
+import destroyStage1 from '../assets/destroy_stage_1.png'
+import destroyStage2 from '../assets/destroy_stage_2.png'
+import destroyStage3 from '../assets/destroy_stage_3.png'
+import destroyStage4 from '../assets/destroy_stage_4.png'
+import destroyStage5 from '../assets/destroy_stage_5.png'
+import destroyStage6 from '../assets/destroy_stage_6.png'
+import destroyStage7 from '../assets/destroy_stage_7.png'
+import destroyStage8 from '../assets/destroy_stage_8.png'
+import destroyStage9 from '../assets/destroy_stage_9.png'
+
+import { hideCurrentModal, isGameActive, showModal } from './globalState'
 import { assertDefined } from './utils'
 import { options } from './optionsStorage'
+import { itemBeingUsed } from './react/Crosshair'
+import { isCypress } from './standaloneUtils'
 
 function getViewDirection (pitch, yaw) {
   const csPitch = Math.cos(pitch)
@@ -33,6 +38,7 @@ class WorldInteraction {
   currentDigTime
   prevOnGround
   lastBlockPlaced: number
+  lastSwing = 0
   buttons = [false, false, false]
   lastButtons = [false, false, false]
   breakStartTime: number | undefined = 0
@@ -67,11 +73,13 @@ class WorldInteraction {
     }
     const breakMaterial = new THREE.MeshBasicMaterial({
       transparent: true,
-      blending: THREE.MultiplyBlending
+      blending: THREE.MultiplyBlending,
+      alphaTest: 0.5,
     })
     this.blockBreakMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), breakMaterial)
     this.blockBreakMesh.visible = false
     this.blockBreakMesh.renderOrder = 999
+    this.blockBreakMesh.name = 'blockBreakMesh'
     viewer.scene.add(this.blockBreakMesh)
 
     // Setup events
@@ -81,14 +89,18 @@ class WorldInteraction {
 
     this.lastBlockPlaced = 4 // ticks since last placed
     document.addEventListener('mousedown', (e) => {
-      if (e.isTrusted && !document.pointerLockElement) return
+      if (e.isTrusted && !document.pointerLockElement && !isCypress()) return
       if (!isGameActive(true)) return
       this.buttons[e.button] = true
 
       const entity = getEntityCursor()
 
       if (entity) {
-        bot.attack(entity)
+        if (e.button === 0) { // left click
+          bot.attack(entity)
+        } else if (e.button === 2) { // right click
+          this.activateEntity(entity)
+        }
       }
     })
     document.addEventListener('blur', (e) => {
@@ -131,6 +143,9 @@ class WorldInteraction {
       }
       this.lastDugBlock = null
     })
+    bot.on('heldItemChanged' as any, () => {
+      itemBeingUsed.name = null
+    })
 
     const upLineMaterial = () => {
       const inCreative = bot.game.gameMode === 'creative'
@@ -145,6 +160,35 @@ class WorldInteraction {
     upLineMaterial()
     // todo use gamemode update only
     bot.on('game', upLineMaterial)
+  }
+
+  activateEntity (entity: Entity) {
+    // mineflayer has completely wrong implementation of this action
+    if (bot.supportFeature('armAnimationBeforeUse')) {
+      bot.swingArm('right')
+    }
+    bot._client.write('use_entity', {
+      target: entity.id,
+      mouse: 2,
+      // todo do not fake
+      x: 0.581_012_585_759_162_9,
+      y: 0.581_012_585_759_162_9,
+      z: 0.581_012_585_759_162_9,
+      // x: raycastPosition.x - entity.position.x,
+      // y: raycastPosition.y - entity.position.y,
+      // z: raycastPosition.z - entity.position.z
+      sneaking: bot.getControlState('sneak'),
+      hand: 0
+    })
+    bot._client.write('use_entity', {
+      target: entity.id,
+      mouse: 0,
+      sneaking: bot.getControlState('sneak'),
+      hand: 0
+    })
+    if (!bot.supportFeature('armAnimationBeforeUse')) {
+      bot.swingArm('right')
+    }
   }
 
   updateBlockInteractionLines (blockPos: Vec3 | null, shapePositions?: Array<{ position; width; height; depth }>) {
@@ -178,7 +222,12 @@ class WorldInteraction {
   // todo this shouldnt be done in the render loop, migrate the code to dom events to avoid delays on lags
   update () {
     const inSpectator = bot.game.gameMode === 'spectator'
-    const cursorBlock = inSpectator && !options.showCursorBlockInSpectator ? null : bot.blockAtCursor(5)
+    const entity = getEntityCursor()
+    let cursorBlock = inSpectator && !options.showCursorBlockInSpectator ? null : bot.blockAtCursor(5)
+    if (entity) {
+      cursorBlock = null
+    }
+
     let cursorBlockDiggable = cursorBlock
     if (cursorBlock && !bot.canDigBlock(cursorBlock) && bot.game.gameMode !== 'creative') cursorBlockDiggable = null
 
@@ -189,17 +238,44 @@ class WorldInteraction {
 
     // Place / interact / activate
     if (this.buttons[2] && this.lastBlockPlaced >= 4) {
-      const activate = bot.heldItem && ['egg', 'fishing_rod', 'firework_rocket',
-        'fire_charge', 'snowball', 'ender_pearl', 'experience_bottle', 'potion',
-        'glass_bottle', 'bucket', 'water_bucket', 'lava_bucket', 'milk_bucket',
-        'minecart', 'boat', 'tnt_minecart', 'chest_minecart', 'hopper_minecart',
-        'command_block_minecart', 'armor_stand', 'lead', 'name_tag',
-        //
-        'writable_book', 'written_book', 'compass', 'clock', 'filled_map', 'empty_map',
-        'shears', 'carrot_on_a_stick', 'warped_fungus_on_a_stick',
-        'spawn_egg', 'trident', 'crossbow', 'elytra', 'shield', 'turtle_helmet',
-      ].includes(bot.heldItem.name)
-      if (cursorBlock && !activate) {
+      const activatableItems = (itemName: string) => {
+        return ['egg', 'fishing_rod', 'firework_rocket',
+          'fire_charge', 'snowball', 'ender_pearl', 'experience_bottle', 'potion',
+          'glass_bottle', 'bucket', 'water_bucket', 'lava_bucket', 'milk_bucket',
+          'minecart', 'boat', 'tnt_minecart', 'chest_minecart', 'hopper_minecart',
+          'command_block_minecart', 'armor_stand', 'lead', 'name_tag',
+          //
+          'writable_book', 'written_book', 'compass', 'clock', 'filled_map', 'empty_map', 'map',
+          'shears', 'carrot_on_a_stick', 'warped_fungus_on_a_stick',
+          'spawn_egg', 'trident', 'crossbow', 'elytra', 'shield', 'turtle_helmet', 'bow', 'crossbow', 'bucket_of_cod',
+          ...loadedData.foodsArray.map((f) => f.name),
+        ].includes(itemName)
+      }
+      const activate = bot.heldItem && activatableItems(bot.heldItem.name)
+      let stop = false
+      if (!bot.controlState.sneak) {
+        if (cursorBlock?.name === 'bed' || cursorBlock?.name.endsWith('_bed')) {
+          stop = true
+          showModal({ reactType: 'bed' })
+          let cancelSleep = true
+          void bot.sleep(cursorBlock).catch((e) => {
+            if (cancelSleep) {
+              hideCurrentModal()
+            }
+            // if (e.message === 'bot is not sleeping') return
+            bot._client.emit('chat', {
+              message: JSON.stringify({
+                text: e.message,
+              })
+            })
+          })
+          setTimeout(() => {
+            cancelSleep = false
+          })
+        }
+      }
+      // todo placing with offhand
+      if (cursorBlock && !activate && !stop) {
         const vecArray = [new Vec3(0, -1, 0), new Vec3(0, 1, 0), new Vec3(0, 0, -1), new Vec3(0, 0, 1), new Vec3(-1, 0, 0), new Vec3(1, 0, 0)]
         //@ts-expect-error
         const delta = cursorBlock.intersect.minus(cursorBlock.position)
@@ -213,14 +289,32 @@ class WorldInteraction {
           //@ts-expect-error
           bot.lookAt = (pos) => { }
           //@ts-expect-error
+          // TODO it still must 1. fire block place 2. swing arm (right)
           bot.activateBlock(cursorBlock, vecArray[cursorBlock.face], delta).finally(() => {
             bot.lookAt = oldLookAt
           }).catch(console.warn)
         }
-        this.lastBlockPlaced = 0
-      } else {
-        bot.activateItem() // todo offhand
+        viewer.world.changeHandSwingingState(true)
+        viewer.world.changeHandSwingingState(false)
+      } else if (!stop) {
+        const offhand = activate ? false : activatableItems(bot.inventory.slots[45]?.name ?? '')
+        bot.activateItem(offhand) // todo offhand
+        const item = offhand ? bot.inventory.slots[45] : bot.heldItem
+        if (item) {
+          customEvents.emit('activateItem', item, offhand ? 45 : bot.quickBarSlot, offhand)
+        }
+        itemBeingUsed.name = (offhand ? bot.inventory.slots[45]?.name : bot.heldItem?.name) ?? null
+        itemBeingUsed.hand = offhand ? 1 : 0
       }
+      this.lastBlockPlaced = 0
+    }
+    // stop using activated item (cancel)
+    if (itemBeingUsed.name && !this.buttons[2]) {
+      itemBeingUsed.name = null
+      // "only foods and bow can be deactivated" - not true, shields also can be deactivated and client always sends this
+      // if (bot.heldItem && (loadedData.foodsArray.map((f) => f.name).includes(bot.heldItem.name) || bot.heldItem.name === 'bow')) {
+      bot.deactivateItem()
+      // }
     }
 
     // Stop break
@@ -259,9 +353,14 @@ class WorldInteraction {
         })
         customEvents.emit('digStart')
         this.lastDigged = Date.now()
-      } else {
+        viewer.world.changeHandSwingingState(true)
+      } else if (performance.now() - this.lastSwing > 200) {
         bot.swingArm('right')
+        this.lastSwing = performance.now()
       }
+    }
+    if (!this.buttons[0] && this.lastButtons[0]) {
+      viewer.world.changeHandSwingingState(false)
     }
     this.prevOnGround = onGround
 

@@ -5,7 +5,7 @@ import { MessageFormatPart, formatMessage } from '../botUtils'
 import { showModal, hideModal } from '../globalState'
 import { options } from '../optionsStorage'
 import DeathScreen from './DeathScreen'
-import { useIsModalActive } from './utils'
+import { useIsModalActive } from './utilsApp'
 
 const dieReasonProxy = proxy({ value: null as MessageFormatPart[] | null })
 
@@ -41,11 +41,11 @@ export default () => {
 
   useEffect(() => {
     if (dieReasonProxy.value) {
-      showModal({ reactType: 'death-screen' })
-    } else {
+      if (!isModalActive) showModal({ reactType: 'death-screen' })
+    } else if (isModalActive) {
       hideModal({ reactType: 'death-screen' })
     }
-  }, [dieReasonMessage])
+  }, [dieReasonMessage, isModalActive])
 
   if (!isModalActive || !dieReasonMessage || options.autoRespawn) return null
 
