@@ -2,24 +2,20 @@ import { useSnapshot } from 'valtio'
 import { openURL } from 'minecraft-renderer/src/lib/simpleUtils'
 import { ErrorBoundary } from '@zardoy/react-util'
 import { miscUiState } from '../globalState'
-import { openGithub } from '../utils'
 import Button from './Button'
-import { DiscordButton } from './DiscordButton'
 import styles from './PauseScreen.module.css'
 
 function PauseLinkButtonsInner () {
   const { appConfig } = useSnapshot(miscUiState)
+  // GitHub / Discord links are intentionally hidden in this fork: drop them
+  // even if a config file still lists them, and drop rows that become empty.
   const pauseLinksConfig = appConfig?.pauseLinks
+    ?.map(row => row.filter(button => button.type !== 'github' && button.type !== 'discord'))
+    .filter(row => row.length > 0)
 
-  if (!pauseLinksConfig) return null
+  if (!pauseLinksConfig?.length) return null
 
   const renderButton = (button: Record<string, any>, style: React.CSSProperties, key: number) => {
-    if (button.type === 'discord') {
-      return <DiscordButton key={key} style={style} text={button.text}/>
-    }
-    if (button.type === 'github') {
-      return <Button key={key} className="button" style={style} onClick={() => openGithub()}>{button.text ?? 'GitHub'}</Button>
-    }
     if (button.type === 'url' && button.text) {
       return <Button key={key} className="button" style={style} onClick={() => openURL(button.url)}>{button.text}</Button>
     }

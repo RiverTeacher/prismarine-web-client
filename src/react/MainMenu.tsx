@@ -44,7 +44,6 @@ const httpsRegex = /^https?:\/\//
 const MainMenuBase = ({
   connectToServerAction,
   mapsProvider,
-  singleplayerAction,
   optionsAction,
   githubAction,
   openFileAction,
@@ -54,7 +53,6 @@ const MainMenuBase = ({
   versionTitle,
   onVersionStatusClick,
   bottomRightLinks,
-  singleplayerAvailable = true,
 }: Props) => {
   const { appConfig } = useSnapshot(miscUiState)
 
@@ -102,14 +100,6 @@ const MainMenuBase = ({
     const parts = l.split(':')
     return [parts[0], parts.slice(1).join(':')]
   }) as Array<[string, string]> | undefined
-
-  const singleplayerLongPress = useLongPress(
-    () => {
-      window.location.href = window.location.pathname + '?sp=1'
-    },
-    () => singleplayerAction?.(null as any),
-    { delay: 500 }
-  )
 
   // "version (3h ago)": the version / commit hash and, in brackets, how long ago this build was made (the exact time is in the tooltip; click still opens the commit on GitHub)
   const buildTimeMs = Number(process.env.BUILD_TIME)
@@ -162,21 +152,7 @@ const MainMenuBase = ({
         >
           Connect to server
         </ButtonWithTooltip>
-        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <ButtonWithTooltip
-            style={{ width: 150 }}
-            {...singleplayerLongPress}
-            data-test-id='singleplayer-button'
-            disabled={!singleplayerAvailable}
-            initialTooltip={{
-              content: 'Create worlds and play offline',
-              placement: 'left',
-              offset: -40
-            }}
-          >
-            Singleplayer
-          </ButtonWithTooltip>
-
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4 }}>
           <ButtonWithTooltip
             disabled={!mapsProvider}
             // className={styles['maps-provider']}
