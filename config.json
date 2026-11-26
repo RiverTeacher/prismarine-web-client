@@ -13,26 +13,7 @@
   "p2pRelayServer": "wss://p2p.mcraft.fun",
   "promoteServers": [
     {
-      "ip": "wss://play.mcraft.fun"
-    },
-    {
-      "ip": "wss://play.webmc.fun",
-      "name": "WebMC"
-    },
-    {
-      "ip": "wss://ws.fuchsmc.net"
-    },
-    {
-      "ip": "wss://play2.mcraft.fun",
-      "description": "Mirror for play.mcraft.fun"
-    },
-    {
-      "ip": "wss://play3.mcraft.fun",
-      "description": "Mirror for play.mcraft.fun"
-    },
-    {
-      "ip": "wss://play-creative.mcraft.fun",
-      "description": "Might be available soon, stay tuned!"
+      "ip": "thearrownetworks.progamer.me"
     }
   ],
   "rightSideText": "A Minecraft client clone in the browser!",
